@@ -55,9 +55,57 @@ export function useMyFields(uid) {
   return { fields, fieldsLoading: loading };
 }
 
+// Fields this owner has a pending, unreviewed claim request on — website-
+// less fields route here instead of instant ownership, since there's
+// nothing to verify the claim against automatically yet.
+export function useMyPendingClaims(uid) {
+  const [fields, setFields] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!uid) {
+      setFields([]);
+      setLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(collection(db, "fields"), where("claimRequestedBy", "==", uid), where("claimPending", "==", true)),
+      (snap) => {
+        setFields(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("useMyPendingClaims error:", err);
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [uid]);
+
+  return { fields, pendingLoading: loading };
+}
+
 export function useFieldActions() {
-  async function claimField(fieldId, ownerId) {
-    await updateDoc(doc(db, "fields", fieldId), { ownerId, claimed: true });
+  // Two real paths, matching the Firestore rules exactly:
+  //  - Fields with a known ownerEmailDomain (a real website on file) claim
+  //    instantly IF the claiming account's email matches that domain — the
+  //    domain match IS the verification, no human review needed.
+  //  - Fields with no domain to verify against (Facebook-only fields, the
+  //    Atlas Field test fixture) file a pending request instead, which
+  //    only becomes a real claim via manual approval in the Firestore
+  //    console — same "no admin panel yet" pattern used everywhere else.
+  // Returns "claimed" or "pending" so the UI can show the right message.
+  async function claimField(field, ownerEmail, ownerId) {
+    if (field.ownerEmailDomain) {
+      const emailDomain = (ownerEmail || "").split("@")[1];
+      if (emailDomain !== field.ownerEmailDomain) {
+        throw new Error(`This field's claim requires an account email ending in @${field.ownerEmailDomain}.`);
+      }
+      await updateDoc(doc(db, "fields", field.id), { ownerId, claimed: true });
+      return "claimed";
+    }
+    await updateDoc(doc(db, "fields", field.id), { claimPending: true, claimRequestedBy: ownerId });
+    return "pending";
   }
 
   // Accepts any subset of the same fields the player app already knows how

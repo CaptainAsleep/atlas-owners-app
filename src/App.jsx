@@ -4,7 +4,7 @@ import {
   ArrowRight, Calendar, MapPin,
 } from "lucide-react";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
-import { useAllFields, useMyFields, useFieldActions } from "./hooks/useOwnerFields";
+import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 
 /* ---------- design tokens — same palette as the player app for immediate
@@ -142,7 +142,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, onOpenField, onOpenClaim, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, onOpenField, onOpenClaim, onLogout }) {
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
@@ -156,6 +156,22 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, onOpenField, onOp
       </div>
 
       <div className="px-6">
+        {!pendingLoading && pendingFields.length > 0 && (
+          <>
+            <Eyebrow>Pending Review</Eyebrow>
+            <div className="mb-5 flex flex-col gap-2">
+              {pendingFields.map((f) => (
+                <div key={f.id} className="p-3 flex items-center gap-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.accent}` }}>
+                  <div className="flex-1">
+                    <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
+                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>Awaiting manual review — no website on file to verify against</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         <div className="mb-4 flex items-center justify-between">
           <Eyebrow>My Fields</Eyebrow>
           <button onClick={onOpenClaim} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>
@@ -194,21 +210,27 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, onOpenField, onOp
 }
 
 /* ---------- Claim a field ---------- */
-function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, claimField, onClaimed }) {
+function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, onClaimed }) {
   const [search, setSearch] = useState("");
   const [claimingId, setClaimingId] = useState(null);
   const [error, setError] = useState("");
+  const [pendingMsg, setPendingMsg] = useState("");
 
   const filtered = allFields.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleClaim = async (field) => {
     setClaimingId(field.id);
     setError("");
+    setPendingMsg("");
     try {
-      await claimField(field.id, ownerId);
-      onClaimed(field.id);
+      const result = await claimField(field, ownerEmail, ownerId);
+      if (result === "claimed") {
+        onClaimed(field.id);
+      } else {
+        setPendingMsg(`Claim request submitted for ${field.name} — this field has no verifiable website on file, so it needs manual review before you get full access.`);
+      }
     } catch (err) {
-      setError("Couldn't claim that field — it may already belong to someone else.");
+      setError(err.message || "Couldn't claim that field — try again.");
     } finally {
       setClaimingId(null);
     }
@@ -236,30 +258,42 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, claimF
         </div>
 
         {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+        {pendingMsg && <p className="text-[12px] mb-3" style={{ ...body, color: T.good }}>{pendingMsg}</p>}
 
         {allFieldsLoading ? (
           <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading fields…</div>
         ) : (
-          filtered.map((f) => (
-            <div key={f.id} className="mb-3 p-4 flex items-center gap-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-              <div className="flex-1">
-                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
-                <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
+          filtered.map((f) => {
+            const isClaimed = f.claimed === true;
+            const isPending = f.claimPending === true;
+            return (
+              <div key={f.id} className="mb-3 p-4 flex items-center gap-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="flex-1">
+                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
+                  <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
+                  {!isClaimed && !isPending && (
+                    <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>
+                      {f.ownerEmailDomain ? `Verified instantly with an @${f.ownerEmailDomain} email` : "No website on file — claim goes to manual review"}
+                    </div>
+                  )}
+                </div>
+                {isClaimed ? (
+                  <span className="text-[11px] font-medium" style={{ ...body, color: T.ashFaint }}>Already claimed</span>
+                ) : isPending ? (
+                  <span className="text-[11px] font-medium" style={{ ...body, color: T.accent }}>Pending Review</span>
+                ) : (
+                  <button
+                    onClick={() => handleClaim(f)}
+                    disabled={claimingId === f.id}
+                    className="px-3 py-2 text-[12px] font-semibold flex-shrink-0"
+                    style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: claimingId === f.id ? 0.6 : 1 }}
+                  >
+                    {claimingId === f.id ? "…" : "Claim"}
+                  </button>
+                )}
               </div>
-              {f.claimed ? (
-                <span className="text-[11px] font-medium" style={{ ...body, color: T.ashFaint }}>Already claimed</span>
-              ) : (
-                <button
-                  onClick={() => handleClaim(f)}
-                  disabled={claimingId === f.id}
-                  className="px-3 py-2 text-[12px] font-semibold"
-                  style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: claimingId === f.id ? 0.6 : 1 }}
-                >
-                  {claimingId === f.id ? "…" : "Claim"}
-                </button>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -519,6 +553,7 @@ export default function App() {
   const { user, profile, authLoading, signUp, signIn, signOut } = useOwnerAuth();
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
+  const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
   const { claimField, updateFieldProfile } = useFieldActions();
 
   const [screen, setScreen] = useState("dashboard"); // dashboard | claim | field | events | eventEdit
@@ -554,6 +589,7 @@ export default function App() {
         allFields={allFields}
         allFieldsLoading={allFieldsLoading}
         ownerId={user.uid}
+        ownerEmail={user.email}
         claimField={claimField}
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setScreen("field"); }}
       />
@@ -595,6 +631,8 @@ export default function App() {
         profile={profile}
         myFields={myFields}
         myFieldsLoading={myFieldsLoading}
+        pendingFields={pendingFields}
+        pendingLoading={pendingLoading}
         onOpenField={(fieldId) => { setActiveFieldId(fieldId); setScreen("field"); }}
         onOpenClaim={() => setScreen("claim")}
         onLogout={handleLogout}
