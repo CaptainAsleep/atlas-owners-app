@@ -35,8 +35,15 @@ export function useOwnerEvents(fieldIds) {
 }
 
 export function useOwnerEventActions() {
-  async function createEvent(fieldId, fieldName, data) {
-    const ref = doc(collection(db, "events"));
+  // Pre-generates an id without writing anything — lets the event-edit
+  // screen upload a banner image to Storage (which needs a real id for its
+  // path) before the event document itself actually exists yet.
+  function newEventId() {
+    return doc(collection(db, "events")).id;
+  }
+
+  async function createEvent(fieldId, fieldName, data, explicitId) {
+    const ref = explicitId ? doc(db, "events", explicitId) : doc(collection(db, "events"));
     await setDoc(ref, { ...data, fieldId, fieldName });
     return ref.id;
   }
@@ -49,5 +56,15 @@ export function useOwnerEventActions() {
     await deleteDoc(doc(db, "events", eventId));
   }
 
-  return { createEvent, updateEvent, deleteEvent };
+  // Copies an existing event as a new draft — same details, new id, no
+  // date carried over (forces the owner to actually pick one rather than
+  // accidentally publishing a duplicate with the original's old date).
+  async function duplicateEvent(original) {
+    const { id, interestCount, ...rest } = original;
+    const ref = doc(collection(db, "events"));
+    await setDoc(ref, { ...rest, date: "", draft: true, title: `${original.title} (Copy)` });
+    return ref.id;
+  }
+
+  return { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId };
 }

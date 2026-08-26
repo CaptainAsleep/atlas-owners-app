@@ -1,11 +1,14 @@
 import React, { useState } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
-  ArrowRight, Calendar, MapPin,
+  ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
 } from "lucide-react";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
+import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
+import { storage } from "./lib/firebase";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 /* ---------- design tokens — same palette as the player app for immediate
    visual/brand consistency across both, even though this is a separate
@@ -29,6 +32,48 @@ const display = { fontFamily: "'Space Grotesk', sans-serif" };
 const body = { fontFamily: "'Inter', sans-serif" };
 const mono = { fontFamily: "'Inter', sans-serif", fontVariantNumeric: "tabular-nums" };
 const flatBg = { background: T.void };
+
+function localDateStr(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parsePrice(str) {
+  const m = (str || "").match(/[\d.]+/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+// Same client-side resize used throughout the player app — shrink before
+// upload so nobody's waiting on a 12MB phone photo.
+function resizeImageFile(file, maxSize = 800, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That doesn't look like a valid image."));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxSize) {
+          height = Math.round((height * maxSize) / width);
+          width = maxSize;
+        } else if (height >= width && height > maxSize) {
+          width = Math.round((width * maxSize) / height);
+          height = maxSize;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))), "image/jpeg", quality);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 function Eyebrow({ children }) {
   return (
@@ -142,7 +187,11 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, onOpenField, onOpenClaim, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onOpenEvent, onLogout }) {
+  const today = localDateStr();
+  const upcoming = events.filter((e) => !e.draft && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const totalInterest = events.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
@@ -168,6 +217,74 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                   </div>
                 </div>
               ))}
+            </div>
+          </>
+        )}
+
+        {myFields.length > 0 && (
+          <>
+            <Eyebrow>Overview</Eyebrow>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Calendar size={13} color={T.ashFaint} />
+                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Upcoming</span>
+                </div>
+                <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : upcoming.length}</div>
+              </div>
+              <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <TrendingUp size={13} color={T.ashFaint} />
+                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</span>
+                </div>
+                <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Players who favorited your events — not confirmed bookings</div>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="mb-4">
+          <PrimaryButton onClick={onOpenEventsList} tone="ash">+ Create New Event</PrimaryButton>
+        </div>
+
+        {upcoming.length > 0 && (
+          <>
+            <div className="mb-3 flex items-center justify-between">
+              <Eyebrow>Upcoming Events</Eyebrow>
+              <button onClick={onOpenEventsList} className="text-[11px] font-medium" style={{ ...body, color: T.accent }}>View All</button>
+            </div>
+            <div className="mb-5 flex flex-col gap-2">
+              {upcoming.slice(0, 3).map((ev) => (
+                <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3 flex items-center justify-between text-left" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                  <div>
+                    <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{ev.fieldName} — {ev.date}</div>
+                  </div>
+                  {ev.interestCount > 0 && (
+                    <span className="text-[11px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {!activityLoading && activity.length > 0 && (
+          <>
+            <Eyebrow>Recent Activity</Eyebrow>
+            <div className="mb-5 flex flex-col gap-2">
+              {activity.map((a, i) => {
+                const ev = events.find((e) => e.id === a.eventId);
+                return (
+                  <div key={i} className="p-3 flex items-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                    <FileSignature size={14} color={T.good} />
+                    <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+                      <span style={{ fontWeight: 600, color: T.ash }}>{a.signedName}</span> signed the waiver for {ev?.title || "an event"}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -301,18 +418,39 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
 }
 
 /* ---------- Field profile editing ---------- */
+const PRESET_AMENITIES = ["Pro Shop", "Chrono Station", "HPA Refills", "Rentals Available", "Parking", "Restrooms", "Food/Drinks", "Accepts Credit/Debit Cards"];
+
 function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) {
+  const [name, setName] = useState(field.name || "");
+  const [address, setAddress] = useState(field.address || "");
+  const [phone, setPhone] = useState(field.phone || "");
+  const [email, setEmail] = useState(field.email || "");
+  const [website, setWebsite] = useState(field.website || "");
   const [about, setAbout] = useState(field.about || "");
   const [hours, setHours] = useState(field.hours || "");
-  const [amenitiesText, setAmenitiesText] = useState((field.amenities || []).join("\n"));
+  const [amenities, setAmenities] = useState(field.amenities || []);
+  const [customAmenity, setCustomAmenity] = useState("");
   const [rulesText, setRulesText] = useState((field.rules || []).join("\n"));
   const [chronoAeg, setChronoAeg] = useState(field.chrono?.aeg || "");
   const [chronoSniper, setChronoSniper] = useState(field.chrono?.sniper || "");
   const [chronoDmr, setChronoDmr] = useState(field.chrono?.dmr || "");
   const [rentals, setRentals] = useState(field.rentals || []);
+  const [gallery, setGallery] = useState(field.galleryPhotos || []);
+  const [galleryUploading, setGalleryUploading] = useState(false);
+  const galleryInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+
+  const toggleAmenity = (a) => {
+    setAmenities(amenities.includes(a) ? amenities.filter((x) => x !== a) : [...amenities, a]);
+  };
+  const addCustomAmenity = () => {
+    const val = customAmenity.trim();
+    if (val && !amenities.includes(val)) setAmenities([...amenities, val]);
+    setCustomAmenity("");
+  };
+  const removeAmenity = (a) => setAmenities(amenities.filter((x) => x !== a));
 
   const addRental = () => setRentals([...rentals, { name: "", price: "", includes: "", availability: "" }]);
   const updateRental = (i, key, value) => {
@@ -322,16 +460,50 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   };
   const removeRental = (i) => setRentals(rentals.filter((_, idx) => idx !== i));
 
+  const handleGalleryPick = () => galleryInputRef.current?.click();
+  const handleGallerySelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setGalleryUploading(true);
+    setError("");
+    try {
+      const resized = await resizeImageFile(file, 1000, 0.85);
+      const fileName = `${Date.now()}.jpg`;
+      const storageRef = ref(storage, `fieldGallery/${field.id}/${fileName}`);
+      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      const nextGallery = [...gallery, { url, path: `fieldGallery/${field.id}/${fileName}` }];
+      setGallery(nextGallery);
+      await updateFieldProfile(field.id, { galleryPhotos: nextGallery });
+    } catch (err) {
+      setError("Couldn't upload that photo — try again.");
+    } finally {
+      setGalleryUploading(false);
+    }
+  };
+  const removeGalleryPhoto = async (photo) => {
+    const nextGallery = gallery.filter((g) => g.url !== photo.url);
+    setGallery(nextGallery);
+    try {
+      await deleteObject(ref(storage, photo.path));
+    } catch {
+      // file may already be gone — not worth failing the UI over
+    }
+    await updateFieldProfile(field.id, { galleryPhotos: nextGallery });
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
     setError("");
     try {
-      const amenities = amenitiesText.split("\n").map((s) => s.trim()).filter(Boolean);
       const rules = rulesText.split("\n").map((s) => s.trim()).filter(Boolean);
       const chrono = (chronoAeg || chronoSniper || chronoDmr) ? { aeg: chronoAeg, sniper: chronoSniper, dmr: chronoDmr } : null;
       const cleanRentals = rentals.filter((r) => r.name.trim());
-      await updateFieldProfile(field.id, { about, hours, amenities, rules, chrono, rentals: cleanRentals });
+      await updateFieldProfile(field.id, {
+        name, address, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals,
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -361,11 +533,85 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
 
-        <Eyebrow>Field Profile</Eyebrow>
+        <Eyebrow>Basic Information</Eyebrow>
+        <TextField label="Field Name" value={name} onChange={setName} />
+        <TextField label="Street Address" value={address} onChange={setAddress} />
+        {field.lat && (
+          <p className="text-[10px] mb-3 -mt-2" style={{ ...body, color: T.ashFaint }}>
+            Changing the address here won't move the map pin — that needs a separate re-geocoding pass. Contact support if the address changes significantly.
+          </p>
+        )}
+        <TextField label="Contact Phone" value={phone} onChange={setPhone} placeholder="+1 (555) 000-0000" />
+        <TextField label="Email Address" value={email} onChange={setEmail} placeholder="contact@yourfield.com" type="email" />
+        <TextField label="Website" value={website} onChange={setWebsite} placeholder="https://yourfield.com" />
+
+        <Eyebrow>About & Hours</Eyebrow>
         <TextField label="About" value={about} onChange={setAbout} rows={3} placeholder="Tell players about your field…" />
         <TextField label="Hours" value={hours} onChange={setHours} placeholder="e.g. Sat 9am–5pm, reservations required" />
-        <TextField label="Amenities (one per line)" value={amenitiesText} onChange={setAmenitiesText} rows={4} placeholder={"Pro Shop\nHPA Fill Station\nRentals Available"} />
-        <TextField label="Field Rules (one per line)" value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
+
+        <Eyebrow>Field Amenities</Eyebrow>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {PRESET_AMENITIES.map((a) => {
+            const active = amenities.includes(a);
+            return (
+              <button
+                key={a}
+                onClick={() => toggleAmenity(a)}
+                className="px-3 py-1.5 text-[12px] font-medium flex items-center gap-1"
+                style={{ ...body, border: `1px solid ${active ? T.good : T.line}`, background: active ? "rgba(15,122,82,0.1)" : "transparent", color: active ? T.good : T.ashDim, borderRadius: 999 }}
+              >
+                {active && <Check size={12} strokeWidth={3} />} {a}
+              </button>
+            );
+          })}
+          {amenities.filter((a) => !PRESET_AMENITIES.includes(a)).map((a) => (
+            <button
+              key={a}
+              onClick={() => removeAmenity(a)}
+              className="px-3 py-1.5 text-[12px] font-medium flex items-center gap-1"
+              style={{ ...body, border: `1px solid ${T.good}`, background: "rgba(15,122,82,0.1)", color: T.good, borderRadius: 999 }}
+            >
+              <Check size={12} strokeWidth={3} /> {a} ×
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 mb-4">
+          <input
+            value={customAmenity}
+            onChange={(e) => setCustomAmenity(e.target.value)}
+            placeholder="Add a custom amenity…"
+            className="flex-1 px-3 py-2 text-[12px] bg-transparent outline-none"
+            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+          />
+          <button onClick={addCustomAmenity} className="px-3 py-2 text-[12px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+            Add
+          </button>
+        </div>
+
+        <Eyebrow>Venue Gallery Photos</Eyebrow>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {gallery.map((g) => (
+            <div key={g.url} className="relative w-20 h-20">
+              <img src={g.url} alt="" className="w-full h-full" style={{ objectFit: "cover", borderRadius: 4 }} />
+              <button onClick={() => removeGalleryPhoto(g)} className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center" style={{ background: T.alert, borderRadius: 999 }}>
+                <span style={{ color: "#fff", fontSize: 11, lineHeight: 1 }}>×</span>
+              </button>
+            </div>
+          ))}
+          <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleGallerySelected} className="hidden" />
+          <button
+            onClick={handleGalleryPick}
+            disabled={galleryUploading}
+            className="w-20 h-20 flex flex-col items-center justify-center gap-1"
+            style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 4 }}
+          >
+            <ImageIcon size={16} color={T.ashDim} />
+            <span className="text-[9px]" style={{ ...body, color: T.ashFaint }}>{galleryUploading ? "…" : "Add Photo"}</span>
+          </button>
+        </div>
+
+        <Eyebrow>Field Rules (one per line)</Eyebrow>
+        <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
 
         <div className="mb-1">
           <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Chrono Limits</label>
@@ -404,7 +650,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved — live on the player app now.</p>}
         <div className="mb-6">
-          <PrimaryButton onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Field Profile"}</PrimaryButton>
+          <PrimaryButton onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Profile Changes"}</PrimaryButton>
         </div>
       </div>
     </div>
@@ -412,7 +658,23 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
 }
 
 /* ---------- Events list + edit ---------- */
-function EventsListScreen({ field, events, eventsLoading, onBack, onNewEvent, onEditEvent, deleteEvent }) {
+function EventsListScreen({ field, events, eventsLoading, onBack, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent }) {
+  const [tab, setTab] = useState("all"); // all | upcoming | past | drafts
+  const today = localDateStr();
+
+  const filtered = events.filter((ev) => {
+    if (tab === "drafts") return ev.draft === true;
+    if (ev.draft) return false; // drafts never show in All/Upcoming/Past
+    if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
+    if (tab === "past") return (ev.endDate || ev.date) < today;
+    return true;
+  });
+
+  const handleDuplicate = async (ev) => {
+    const newId = await duplicateEvent(ev);
+    onEditEvent({ ...ev, id: newId, title: `${ev.title} (Copy)`, date: "", draft: true });
+  };
+
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
@@ -424,26 +686,53 @@ function EventsListScreen({ field, events, eventsLoading, onBack, onNewEvent, on
 
       <div className="px-6 pt-4">
         <div className="mb-4">
-          <PrimaryButton onClick={onNewEvent}>+ New Event</PrimaryButton>
+          <PrimaryButton onClick={onNewEvent}>+ Create New Event</PrimaryButton>
+        </div>
+
+        <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${T.line}` }}>
+          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"]].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className="px-3 py-2 text-[12px] font-semibold"
+              style={{ ...body, color: tab === key ? T.ash : T.ashFaint, borderBottom: tab === key ? `2px solid ${T.ash}` : "2px solid transparent" }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {eventsLoading ? (
           <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
-        ) : events.length === 0 ? (
-          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No events yet for this field.</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Nothing here yet.</div>
         ) : (
-          events.map((ev) => (
+          filtered.map((ev) => (
             <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
               <div className="flex items-start justify-between mb-1">
-                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                <div className="flex items-center gap-2">
+                  {ev.draft && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+                  )}
+                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                </div>
                 {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.price}</div>}
               </div>
-              <div className="text-[12px] mb-3" style={{ ...body, color: T.ashFaint }}>
-                {ev.date}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
+              <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
+                {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
               </div>
-              <div className="flex gap-2">
+              {ev.interestCount > 0 && (
+                <div className="text-[11px] font-semibold mb-3" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
+              )}
+              <div className="flex gap-2 flex-wrap">
                 <button onClick={() => onEditEvent(ev)} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   Edit
+                </button>
+                <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  <FileSignature size={12} /> Waivers
+                </button>
+                <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  <Copy size={12} />
                 </button>
                 <button onClick={() => deleteEvent(ev.id)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
                   Delete
@@ -457,39 +746,83 @@ function EventsListScreen({ field, events, eventsLoading, onBack, onNewEvent, on
   );
 }
 
-function EventEditScreen({ field, existing, onBack, createEvent, updateEvent }) {
+const GAME_TYPES = [
+  { key: "OUTDOOR", label: "Outdoor Rec Play" },
+  { key: "MILSIM", label: "MilSim" },
+  { key: "INDOOR", label: "Indoor" },
+  { key: "TOURNAMENT", label: "Tournament" },
+];
+
+function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, newEventId }) {
+  const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
   const [date, setDate] = useState(existing?.date || "");
   const [endDate, setEndDate] = useState(existing?.endDate || "");
   const [startTime, setStartTime] = useState(existing?.startTime || "");
   const [price, setPrice] = useState(existing?.price || "");
+  const [maxCapacity, setMaxCapacity] = useState(existing?.maxCapacity || "");
   const [type, setType] = useState(existing?.type || "OUTDOOR");
   const [description, setDescription] = useState(existing?.description || "");
+  const [imageUrl, setImageUrl] = useState(existing?.imageUrl || null);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const bannerInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSave = async () => {
-    if (!title.trim() || !date) {
-      setError("Title and date are required.");
+  const projectedRevenue = (() => {
+    const p = parsePrice(price);
+    const cap = parseInt(maxCapacity, 10);
+    if (!p || !cap) return null;
+    return (p * cap).toFixed(2);
+  })();
+
+  const handleBannerPick = () => bannerInputRef.current?.click();
+  const handleBannerSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBannerUploading(true);
+    setError("");
+    try {
+      const resized = await resizeImageFile(file, 1200, 0.85);
+      const storageRef = ref(storage, `eventBanners/${field.id}/${eventId}/banner.jpg`);
+      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      setImageUrl(url);
+    } catch (err) {
+      setError("Couldn't upload that image — try again.");
+    } finally {
+      setBannerUploading(false);
+    }
+  };
+
+  const buildData = (draft) => ({
+    title: title.trim(),
+    date,
+    endDate: endDate || null,
+    startTime: startTime || null,
+    price: price || null,
+    maxCapacity: maxCapacity ? parseInt(maxCapacity, 10) : null,
+    type,
+    description: description.trim(),
+    imageUrl: imageUrl || null,
+    sourceUrl: field.website || "",
+    draft,
+  });
+
+  const handleSave = async (draft) => {
+    if (!title.trim() || (!draft && !date)) {
+      setError(draft ? "Give it a title before saving." : "Title and date are required to publish.");
       return;
     }
     setSaving(true);
     setError("");
     try {
-      const data = {
-        title: title.trim(),
-        date,
-        endDate: endDate || null,
-        startTime: startTime || null,
-        price: price || null,
-        type,
-        description: description.trim(),
-        sourceUrl: field.website || "",
-      };
+      const data = buildData(draft);
       if (existing) {
-        await updateEvent(existing.id, data);
+        await updateEvent(eventId, data);
       } else {
-        await createEvent(field.id, field.name, data);
+        await createEvent(field.id, field.name, data, eventId);
       }
       onBack();
     } catch (err) {
@@ -505,11 +838,31 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent }) 
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
         </button>
-        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{existing ? "Edit Event" : "New Event"}</h1>
+        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{existing ? "Edit Event" : "Create New Event"}</h1>
       </div>
 
       <div className="px-6 pt-4">
-        <TextField label="Title" value={title} onChange={setTitle} placeholder="Event name" />
+        <Eyebrow>Event Banner</Eyebrow>
+        <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
+        <button
+          onClick={handleBannerPick}
+          disabled={bannerUploading}
+          className="w-full h-32 mb-4 flex flex-col items-center justify-center gap-1 overflow-hidden"
+          style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 6 }}
+        >
+          {imageUrl ? (
+            <img src={imageUrl} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+          ) : (
+            <>
+              <ImageIcon size={20} color={T.ashDim} />
+              <span className="text-[12px] font-medium" style={{ ...body, color: T.accent }}>{bannerUploading ? "Uploading…" : "Upload event poster or photo"}</span>
+              <span className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Recommended: 16:9, high resolution</span>
+            </>
+          )}
+        </button>
+
+        <Eyebrow>Event Details</Eyebrow>
+        <TextField label="Event Name" value={title} onChange={setTitle} placeholder="e.g. Saturday Woods CQB Classic" />
         <div className="flex gap-2">
           <div className="flex-1">
             <TextField label="Date" value={date} onChange={setDate} type="date" />
@@ -519,30 +872,96 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent }) 
           </div>
         </div>
         <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
-        <TextField label="Price" value={price} onChange={setPrice} placeholder="e.g. $20 or Price varies" />
 
         <div className="mb-3">
-          <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Type</label>
+          <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Game Type</label>
           <div className="flex gap-2 flex-wrap">
-            {["OUTDOOR", "MILSIM", "INDOOR", "TOURNAMENT"].map((t) => (
+            {GAME_TYPES.map((t) => (
               <button
-                key={t}
-                onClick={() => setType(t)}
+                key={t.key}
+                onClick={() => setType(t.key)}
                 className="px-3 py-1.5 text-[12px] font-medium"
-                style={{ ...body, border: `1px solid ${type === t ? T.accent : T.line}`, background: type === t ? T.accent : "transparent", color: type === t ? "#fff" : T.ashDim, borderRadius: 4 }}
+                style={{ ...body, border: `1px solid ${type === t.key ? T.accent : T.line}`, background: type === t.key ? T.accent : "transparent", color: type === t.key ? "#fff" : T.ashDim, borderRadius: 4 }}
               >
-                {t}
+                {t.label}
               </button>
             ))}
           </div>
         </div>
 
-        <TextField label="Description" value={description} onChange={setDescription} rows={4} placeholder="What players should know about this event…" />
+        <Eyebrow>Pricing & Capacity</Eyebrow>
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="$25 or Price varies" />
+          </div>
+          <div className="flex-1">
+            <TextField label="Max Capacity" value={maxCapacity} onChange={setMaxCapacity} placeholder="120" type="number" />
+          </div>
+        </div>
+        {projectedRevenue && (
+          <p className="text-[12px] mb-3 -mt-1" style={{ ...body, color: T.ashDim }}>
+            Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${projectedRevenue}</span> — entry cost × capacity, not a real payment yet
+          </p>
+        )}
+
+        <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
-        <div className="mb-6">
-          <PrimaryButton onClick={handleSave} disabled={saving}>{saving ? "Saving…" : existing ? "Save Changes" : "Create Event"}</PrimaryButton>
+        <div className="mb-2">
+          <PrimaryButton onClick={() => handleSave(false)} disabled={saving}>{saving ? "Saving…" : "Publish Event"}</PrimaryButton>
         </div>
+        <div className="mb-6">
+          <button
+            onClick={() => handleSave(true)}
+            disabled={saving}
+            className="w-full py-3 font-semibold text-[14px]"
+            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
+          >
+            Save as Draft
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Roster (real waiver signatures) ---------- */
+function RosterScreen({ event, onBack }) {
+  const { signatures, signaturesLoading } = useEventWaivers(event.id);
+
+  return (
+    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+          <ChevronLeft size={20} color={T.ash} />
+        </button>
+        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Waivers</h1>
+      </div>
+
+      <div className="px-6 pt-4">
+        <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{event.title}</div>
+        <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
+          Everyone who's signed the waiver for this event. This isn't a confirmed attendance list — signing a waiver
+          isn't the same as showing up. Real check-in tracking needs the QR scanner, which isn't built yet.
+        </p>
+
+        {signaturesLoading ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : signatures.length === 0 ? (
+          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <FileSignature size={22} color={T.ashDim} className="mb-2" />
+            <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>No signatures yet</div>
+          </div>
+        ) : (
+          signatures.map((s, i) => (
+            <div key={i} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{s.signedName}</div>
+              <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>
+                {s.signedAt?.toDate ? s.signedAt.toDate().toLocaleDateString() : ""}
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -556,14 +975,17 @@ export default function App() {
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
   const { claimField, updateFieldProfile } = useFieldActions();
 
-  const [screen, setScreen] = useState("dashboard"); // dashboard | claim | field | events | eventEdit
+  const [screen, setScreen] = useState("dashboard"); // dashboard | claim | field | events | eventEdit | roster
   const [activeFieldId, setActiveFieldId] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null); // null = new event
+  const [rosterEvent, setRosterEvent] = useState(null);
 
   const activeField = myFields.find((f) => f.id === activeFieldId) || allFields.find((f) => f.id === activeFieldId);
-  const activeFieldOwnedIds = activeField ? [activeField.id] : [];
-  const { events, eventsLoading } = useOwnerEvents(activeFieldOwnedIds);
-  const { createEvent, updateEvent, deleteEvent } = useOwnerEventActions();
+  const myFieldIds = myFields.map((f) => f.id);
+  const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
+  const { events: fieldEvents, eventsLoading: fieldEventsLoading } = useOwnerEvents(activeField ? [activeField.id] : []);
+  const { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId } = useOwnerEventActions();
+  const { activity, activityLoading } = useRecentActivity(myFieldIds);
 
   const handleLogout = async () => {
     await signOut();
@@ -607,12 +1029,14 @@ export default function App() {
     content = (
       <EventsListScreen
         field={activeField}
-        events={events}
-        eventsLoading={eventsLoading}
+        events={fieldEvents}
+        eventsLoading={fieldEventsLoading}
         onBack={() => setScreen("field")}
         onNewEvent={() => { setEditingEvent(null); setScreen("eventEdit"); }}
         onEditEvent={(ev) => { setEditingEvent(ev); setScreen("eventEdit"); }}
+        onOpenRoster={(ev) => { setRosterEvent(ev); setScreen("roster"); }}
         deleteEvent={deleteEvent}
+        duplicateEvent={duplicateEvent}
       />
     );
   } else if (screen === "eventEdit" && activeField) {
@@ -623,8 +1047,11 @@ export default function App() {
         onBack={() => setScreen("events")}
         createEvent={createEvent}
         updateEvent={updateEvent}
+        newEventId={newEventId}
       />
     );
+  } else if (screen === "roster" && rosterEvent) {
+    content = <RosterScreen event={rosterEvent} onBack={() => setScreen("events")} />;
   } else {
     content = (
       <DashboardScreen
@@ -633,8 +1060,17 @@ export default function App() {
         myFieldsLoading={myFieldsLoading}
         pendingFields={pendingFields}
         pendingLoading={pendingLoading}
+        events={allMyEvents}
+        eventsLoading={allMyEventsLoading}
+        activity={activity}
+        activityLoading={activityLoading}
         onOpenField={(fieldId) => { setActiveFieldId(fieldId); setScreen("field"); }}
         onOpenClaim={() => setScreen("claim")}
+        onOpenEventsList={() => {
+          if (myFields.length > 0) { setActiveFieldId(myFields[0].id); setScreen("events"); }
+          else setScreen("claim");
+        }}
+        onOpenEvent={(ev) => { setActiveFieldId(ev.fieldId); setEditingEvent(ev); setScreen("eventEdit"); }}
         onLogout={handleLogout}
       />
     );
