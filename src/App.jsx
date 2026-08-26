@@ -786,7 +786,11 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     type,
     description: description.trim(),
     imageUrl: imageUrl || null,
-    sourceUrl: field.website || "",
+    // Deliberately no sourceUrl here — an event created directly in the app
+    // has no "original listing" elsewhere to link to. The player app only
+    // shows that link when sourceUrl is genuinely set (scraped events).
+    // Defaulting this to the field's homepage would be misleading — it'd
+    // look like a specific event page exists when it doesn't.
     draft,
   });
 
