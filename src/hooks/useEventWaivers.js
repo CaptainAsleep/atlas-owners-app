@@ -40,11 +40,13 @@ export function useEventWaivers(eventId) {
 // real data for a "recent activity" feed, as opposed to fabricating one.
 export function useRecentActivity(fieldIds) {
   const [activity, setActivity] = useState([]);
+  const [totalSignatures, setTotalSignatures] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!fieldIds || fieldIds.length === 0) {
       setActivity([]);
+      setTotalSignatures(0);
       setLoading(false);
       return;
     }
@@ -53,6 +55,7 @@ export function useRecentActivity(fieldIds) {
       (snap) => {
         const list = snap.docs.map((d) => d.data());
         list.sort((a, b) => (b.signedAt?.toMillis?.() || 0) - (a.signedAt?.toMillis?.() || 0));
+        setTotalSignatures(list.length);
         setActivity(list.slice(0, 5));
         setLoading(false);
       },
@@ -64,5 +67,5 @@ export function useRecentActivity(fieldIds) {
     return unsub;
   }, [JSON.stringify(fieldIds)]);
 
-  return { activity, activityLoading: loading };
+  return { activity, totalSignatures, activityLoading: loading };
 }

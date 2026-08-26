@@ -1,13 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
+  Settings, Users, LayoutDashboard,
 } from "lucide-react";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { storage } from "./lib/firebase";
+import { db, storage } from "./lib/firebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 /* ---------- design tokens — same palette as the player app for immediate
@@ -421,6 +423,9 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
 const PRESET_AMENITIES = ["Pro Shop", "Chrono Station", "HPA Refills", "Rentals Available", "Parking", "Restrooms", "Food/Drinks", "Accepts Credit/Debit Cards"];
 
 function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) {
+  const [imageUrl, setImageUrl] = useState(field.imageUrl || null);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const bannerInputRef = React.useRef(null);
   const [name, setName] = useState(field.name || "");
   const [address, setAddress] = useState(field.address || "");
   const [phone, setPhone] = useState(field.phone || "");
@@ -459,6 +464,27 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     setRentals(next);
   };
   const removeRental = (i) => setRentals(rentals.filter((_, idx) => idx !== i));
+
+  const handleBannerPick = () => bannerInputRef.current?.click();
+  const handleBannerSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBannerUploading(true);
+    setError("");
+    try {
+      const resized = await resizeImageFile(file, 1200, 0.85);
+      const storageRef = ref(storage, `fieldGallery/${field.id}/banner.jpg`);
+      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      setImageUrl(url);
+      await updateFieldProfile(field.id, { imageUrl: url });
+    } catch (err) {
+      setError("Couldn't upload that image — try again.");
+    } finally {
+      setBannerUploading(false);
+    }
+  };
 
   const handleGalleryPick = () => galleryInputRef.current?.click();
   const handleGallerySelected = async (e) => {
@@ -502,7 +528,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       const chrono = (chronoAeg || chronoSniper || chronoDmr) ? { aeg: chronoAeg, sniper: chronoSniper, dmr: chronoDmr } : null;
       const cleanRentals = rentals.filter((r) => r.name.trim());
       await updateFieldProfile(field.id, {
-        name, address, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals,
+        name, address, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -523,6 +549,25 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       </div>
 
       <div className="px-6 pt-4">
+        <Eyebrow>Field Banner</Eyebrow>
+        <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
+        <button
+          onClick={handleBannerPick}
+          disabled={bannerUploading}
+          className="w-full h-32 mb-5 flex flex-col items-center justify-center gap-1 overflow-hidden"
+          style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 6 }}
+        >
+          {imageUrl ? (
+            <img src={imageUrl} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+          ) : (
+            <>
+              <ImageIcon size={20} color={T.ashDim} />
+              <span className="text-[12px] font-medium" style={{ ...body, color: T.accent }}>{bannerUploading ? "Uploading…" : "Upload field banner photo"}</span>
+              <span className="text-[10px]" style={{ ...body, color: T.ashFaint }}>This is the main photo players see on your field's page</span>
+            </>
+          )}
+        </button>
+
         <button
           onClick={onOpenEvents}
           className="w-full mb-5 p-4 flex items-center gap-3 text-left"
@@ -657,95 +702,6 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   );
 }
 
-/* ---------- Events list + edit ---------- */
-function EventsListScreen({ field, events, eventsLoading, onBack, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent }) {
-  const [tab, setTab] = useState("all"); // all | upcoming | past | drafts
-  const today = localDateStr();
-
-  const filtered = events.filter((ev) => {
-    if (tab === "drafts") return ev.draft === true;
-    if (ev.draft) return false; // drafts never show in All/Upcoming/Past
-    if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
-    if (tab === "past") return (ev.endDate || ev.date) < today;
-    return true;
-  });
-
-  const handleDuplicate = async (ev) => {
-    const newId = await duplicateEvent(ev);
-    onEditEvent({ ...ev, id: newId, title: `${ev.title} (Copy)`, date: "", draft: true });
-  };
-
-  return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
-      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
-        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
-          <ChevronLeft size={20} color={T.ash} />
-        </button>
-        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Events — {field.name}</h1>
-      </div>
-
-      <div className="px-6 pt-4">
-        <div className="mb-4">
-          <PrimaryButton onClick={onNewEvent}>+ Create New Event</PrimaryButton>
-        </div>
-
-        <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${T.line}` }}>
-          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"]].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className="px-3 py-2 text-[12px] font-semibold"
-              style={{ ...body, color: tab === key ? T.ash : T.ashFaint, borderBottom: tab === key ? `2px solid ${T.ash}` : "2px solid transparent" }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {eventsLoading ? (
-          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Nothing here yet.</div>
-        ) : (
-          filtered.map((ev) => (
-            <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-              <div className="flex items-start justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  {ev.draft && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
-                  )}
-                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
-                </div>
-                {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.price}</div>}
-              </div>
-              <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
-                {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
-              </div>
-              {ev.interestCount > 0 && (
-                <div className="text-[11px] font-semibold mb-3" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
-              )}
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => onEditEvent(ev)} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                  Edit
-                </button>
-                <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                  <FileSignature size={12} /> Waivers
-                </button>
-                <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                  <Copy size={12} />
-                </button>
-                <button onClick={() => deleteEvent(ev.id)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
 const GAME_TYPES = [
   { key: "OUTDOOR", label: "Outdoor Rec Play" },
   { key: "MILSIM", label: "MilSim" },
@@ -759,7 +715,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [date, setDate] = useState(existing?.date || "");
   const [endDate, setEndDate] = useState(existing?.endDate || "");
   const [startTime, setStartTime] = useState(existing?.startTime || "");
-  const [price, setPrice] = useState(existing?.price || "");
+  const [price, setPrice] = useState(existing?.price || "$");
   const [maxCapacity, setMaxCapacity] = useState(existing?.maxCapacity || "");
   const [type, setType] = useState(existing?.type || "OUTDOOR");
   const [description, setDescription] = useState(existing?.description || "");
@@ -768,6 +724,30 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const bannerInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // A lightweight, one-time heads-up (not a live listener — this is just
+  // advisory, not something that needs to stay in sync while editing) —
+  // shows other fields' events landing on the same date, so an owner isn't
+  // accidentally scheduling head-to-head against a nearby field's big game.
+  // Purely informational; never blocks saving or publishing.
+  const [competingEvents, setCompetingEvents] = useState([]);
+  useEffect(() => {
+    if (!date) {
+      setCompetingEvents([]);
+      return;
+    }
+    let cancelled = false;
+    getDocs(query(collection(db, "events"), where("date", "==", date)))
+      .then((snap) => {
+        if (cancelled) return;
+        const others = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((e) => e.fieldId !== field.id && !e.draft && e.id !== eventId);
+        setCompetingEvents(others);
+      })
+      .catch((err) => console.error("competing events check failed:", err));
+    return () => { cancelled = true; };
+  }, [date]);
 
   const projectedRevenue = (() => {
     const p = parsePrice(price);
@@ -871,6 +851,19 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             <TextField label="End Date (optional)" value={endDate} onChange={setEndDate} type="date" />
           </div>
         </div>
+
+        {competingEvents.length > 0 && (
+          <div className="mb-3 p-3" style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}>
+            <div className="text-[12px] font-semibold mb-1" style={{ ...display, color: T.ash }}>
+              {competingEvents.length === 1 ? "Another field has an event this same day" : `${competingEvents.length} other events land on this same day`}
+            </div>
+            {competingEvents.map((ev) => (
+              <div key={ev.id} className="text-[11px]" style={{ ...body, color: T.ashDim }}>{ev.title} — {ev.fieldName}</div>
+            ))}
+            <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>Just a heads-up — players can only be at one event at a time. Not a blocker.</p>
+          </div>
+        )}
+
         <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
 
         <div className="mb-3">
@@ -892,7 +885,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         <Eyebrow>Pricing & Capacity</Eyebrow>
         <div className="flex gap-2">
           <div className="flex-1">
-            <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="$25 or Price varies" />
+            <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="25 (or clear and type 'Price varies')" />
           </div>
           <div className="flex-1">
             <TextField label="Max Capacity" value={maxCapacity} onChange={setMaxCapacity} placeholder="120" type="number" />
@@ -967,15 +960,313 @@ function RosterScreen({ event, onBack }) {
   );
 }
 
+/* ---------- Bottom nav ---------- */
+function OwnerBottomNav({ active, onNavigate }) {
+  const tabs = [
+    { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { key: "events", label: "Events", icon: Calendar },
+    { key: "analytics", label: "Analytics", icon: TrendingUp },
+    { key: "roster", label: "Roster", icon: Users },
+    { key: "settings", label: "Settings", icon: Settings },
+  ];
+  return (
+    <div className="absolute bottom-0 left-0 right-0 border-t" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
+      <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 20 }}>
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          const isActive = active === t.key;
+          return (
+            <button key={t.key} onClick={() => onNavigate(t.key)} className="flex flex-col items-center gap-1 flex-1">
+              <Icon size={19} color={isActive ? T.accent : T.ashDim} strokeWidth={1.7} />
+              <span className="text-[9px] font-medium" style={{ ...body, color: isActive ? T.accent : T.ashDim }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent }) {
+  const [tab, setTab] = useState("all");
+  const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
+  const today = localDateStr();
+
+  const filtered = events.filter((ev) => {
+    if (tab === "drafts") return ev.draft === true;
+    if (ev.draft) return false;
+    if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
+    if (tab === "past") return (ev.endDate || ev.date) < today;
+    return true;
+  });
+
+  const handleDuplicate = async (ev) => {
+    const newId = await duplicateEvent(ev);
+    onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], { ...ev, id: newId, title: `${ev.title} (Copy)`, date: "", draft: true });
+  };
+
+  const handleNew = () => {
+    const field = myFields.find((f) => f.id === pickerFieldId) || myFields[0];
+    if (field) onNewEvent(field);
+  };
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>Events</div>
+      </div>
+
+      <div className="px-6">
+        {myFields.length === 0 ? (
+          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <Calendar size={22} color={T.ashDim} className="mb-2" />
+            <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>Claim a field first</div>
+            <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>You'll need a field before you can create events.</p>
+          </div>
+        ) : (
+          <>
+            {myFields.length > 1 && (
+              <div className="mb-3 flex gap-2 flex-wrap">
+                {myFields.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setPickerFieldId(f.id)}
+                    className="px-3 py-1.5 text-[12px] font-medium"
+                    style={{ ...body, border: `1px solid ${pickerFieldId === f.id ? T.accent : T.line}`, background: pickerFieldId === f.id ? T.accent : "transparent", color: pickerFieldId === f.id ? "#fff" : T.ashDim, borderRadius: 4 }}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mb-4">
+              <PrimaryButton onClick={handleNew}>+ Create New Event</PrimaryButton>
+            </div>
+          </>
+        )}
+
+        <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${T.line}` }}>
+          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"]].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className="px-3 py-2 text-[12px] font-semibold"
+              style={{ ...body, color: tab === key ? T.ash : T.ashFaint, borderBottom: tab === key ? `2px solid ${T.ash}` : "2px solid transparent" }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {eventsLoading ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Nothing here yet.</div>
+        ) : (
+          filtered.map((ev) => (
+            <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="flex items-start justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  {ev.draft && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+                  )}
+                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                </div>
+                {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.price}</div>}
+              </div>
+              <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
+                {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
+              </div>
+              {ev.interestCount > 0 && (
+                <div className="text-[11px] font-semibold mb-3" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  Edit
+                </button>
+                <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  <FileSignature size={12} /> Waivers
+                </button>
+                <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  <Copy size={12} />
+                </button>
+                <button onClick={() => deleteEvent(ev.id)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Roster hub (top-level tab — pick an event, then see who's signed) ---------- */
+function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
+  const today = localDateStr();
+  const sorted = [...events].filter((e) => !e.draft).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Roster</div>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Pick an event to see who's signed its waiver.</p>
+      </div>
+
+      <div className="px-6">
+        {eventsLoading ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : sorted.length === 0 ? (
+          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No published events yet.</div>
+        ) : (
+          sorted.map((ev) => (
+            <button
+              key={ev.id}
+              onClick={() => onOpenRoster(ev)}
+              className="w-full mb-3 p-4 flex items-center justify-between text-left"
+              style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+            >
+              <div>
+                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{ev.fieldName} · {ev.date}{(ev.endDate || ev.date) >= today ? "" : " (past)"}</div>
+              </div>
+              <ChevronRight size={16} color={T.ashFaint} />
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Analytics (top-level tab, real numbers only) ---------- */
+function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoading }) {
+  const published = events.filter((e) => !e.draft);
+  const totalInterest = published.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+  const topEvents = [...published].filter((e) => e.interestCount > 0).sort((a, b) => (b.interestCount || 0) - (a.interestCount || 0)).slice(0, 5);
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>Analytics</div>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Real numbers only — no revenue or ratings, since neither payments nor reviews exist yet.</p>
+      </div>
+
+      <div className="px-6">
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Published Events</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : published.length}</div>
+          </div>
+          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
+          </div>
+          <div className="p-4 col-span-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Waiver Signatures</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{activityLoading ? "…" : totalSignatures}</div>
+          </div>
+        </div>
+
+        <Eyebrow>Most Interest</Eyebrow>
+        {topEvents.length === 0 ? (
+          <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>No interest data yet.</div>
+        ) : (
+          topEvents.map((ev) => (
+            <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.title}</div>
+              <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Settings ---------- */
+function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField, onOpenClaim, onLogout }) {
+  const [name, setName] = useState(profile?.name || "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await updateOwnerName(name.trim());
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-6 pb-4">
+        <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>Settings</div>
+      </div>
+
+      <div className="px-6">
+        <Eyebrow>Account</Eyebrow>
+        <TextField label="Your Name" value={name} onChange={setName} />
+        <p className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Email</p>
+        <p className="text-[13px] mb-3" style={{ ...body, color: T.ashDim }}>{user?.email}</p>
+        {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved.</p>}
+        <div className="mb-6">
+          <PrimaryButton onClick={handleSave} disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
+        </div>
+
+        <div className="mb-4 flex items-center justify-between">
+          <Eyebrow>My Fields</Eyebrow>
+          <button onClick={onOpenClaim} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Claim a Field</button>
+        </div>
+        {myFields.length === 0 ? (
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No fields claimed yet.</p>
+        ) : (
+          myFields.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => onOpenField(f.id)}
+              className="w-full mb-3 p-4 flex items-center gap-3 text-left"
+              style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+            >
+              <div className="flex-1">
+                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
+                <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
+              </div>
+              <ChevronRight size={16} color={T.ashFaint} />
+            </button>
+          ))
+        )}
+
+        <div className="mt-4 mb-6">
+          <button
+            onClick={onLogout}
+            className="w-full py-3 font-medium text-[14px] flex items-center justify-center gap-2"
+            style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}
+          >
+            <LogOut size={15} /> Log Out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- App shell ---------- */
 export default function App() {
-  const { user, profile, authLoading, signUp, signIn, signOut } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName } = useOwnerAuth();
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
   const { claimField, updateFieldProfile } = useFieldActions();
 
-  const [screen, setScreen] = useState("dashboard"); // dashboard | claim | field | events | eventEdit | roster
+  const [activeTab, setActiveTab] = useState("dashboard"); // dashboard | events | analytics | roster | settings
+  const [overlay, setOverlay] = useState(null); // null | claim | field | eventEdit | roster
   const [activeFieldId, setActiveFieldId] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null); // null = new event
   const [rosterEvent, setRosterEvent] = useState(null);
@@ -983,13 +1274,19 @@ export default function App() {
   const activeField = myFields.find((f) => f.id === activeFieldId) || allFields.find((f) => f.id === activeFieldId);
   const myFieldIds = myFields.map((f) => f.id);
   const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
-  const { events: fieldEvents, eventsLoading: fieldEventsLoading } = useOwnerEvents(activeField ? [activeField.id] : []);
   const { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId } = useOwnerEventActions();
-  const { activity, activityLoading } = useRecentActivity(myFieldIds);
+  const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
+
+  const openField = (fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); };
+  const openClaim = () => setOverlay("claim");
+  const openEventEdit = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev || null); setOverlay("eventEdit"); };
+  const openRoster = (ev) => { setRosterEvent(ev); setOverlay("roster"); };
+  const closeOverlay = () => setOverlay(null);
 
   const handleLogout = async () => {
     await signOut();
-    setScreen("dashboard");
+    setActiveTab("dashboard");
+    setOverlay(null);
   };
 
   if (authLoading) {
@@ -1002,84 +1299,111 @@ export default function App() {
   }
 
   let content;
+  let showNav = false;
+
   if (!user) {
     content = <LoginScreen signIn={signIn} signUp={signUp} />;
-  } else if (screen === "claim") {
+  } else if (overlay === "claim") {
     content = (
       <ClaimFieldScreen
-        onBack={() => setScreen("dashboard")}
+        onBack={closeOverlay}
         allFields={allFields}
         allFieldsLoading={allFieldsLoading}
         ownerId={user.uid}
         ownerEmail={user.email}
         claimField={claimField}
-        onClaimed={(fieldId) => { setActiveFieldId(fieldId); setScreen("field"); }}
+        onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); }}
       />
     );
-  } else if (screen === "field" && activeField) {
+  } else if (overlay === "field" && activeField) {
     content = (
       <FieldManageScreen
         field={activeField}
-        onBack={() => setScreen("dashboard")}
+        onBack={closeOverlay}
         updateFieldProfile={updateFieldProfile}
-        onOpenEvents={() => setScreen("events")}
+        onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
       />
     );
-  } else if (screen === "events" && activeField) {
-    content = (
-      <EventsListScreen
-        field={activeField}
-        events={fieldEvents}
-        eventsLoading={fieldEventsLoading}
-        onBack={() => setScreen("field")}
-        onNewEvent={() => { setEditingEvent(null); setScreen("eventEdit"); }}
-        onEditEvent={(ev) => { setEditingEvent(ev); setScreen("eventEdit"); }}
-        onOpenRoster={(ev) => { setRosterEvent(ev); setScreen("roster"); }}
-        deleteEvent={deleteEvent}
-        duplicateEvent={duplicateEvent}
-      />
-    );
-  } else if (screen === "eventEdit" && activeField) {
+  } else if (overlay === "eventEdit" && activeField) {
     content = (
       <EventEditScreen
         field={activeField}
         existing={editingEvent}
-        onBack={() => setScreen("events")}
+        onBack={closeOverlay}
         createEvent={createEvent}
         updateEvent={updateEvent}
         newEventId={newEventId}
       />
     );
-  } else if (screen === "roster" && rosterEvent) {
-    content = <RosterScreen event={rosterEvent} onBack={() => setScreen("events")} />;
+  } else if (overlay === "roster" && rosterEvent) {
+    content = <RosterScreen event={rosterEvent} onBack={closeOverlay} />;
   } else {
-    content = (
-      <DashboardScreen
-        profile={profile}
-        myFields={myFields}
-        myFieldsLoading={myFieldsLoading}
-        pendingFields={pendingFields}
-        pendingLoading={pendingLoading}
-        events={allMyEvents}
-        eventsLoading={allMyEventsLoading}
-        activity={activity}
-        activityLoading={activityLoading}
-        onOpenField={(fieldId) => { setActiveFieldId(fieldId); setScreen("field"); }}
-        onOpenClaim={() => setScreen("claim")}
-        onOpenEventsList={() => {
-          if (myFields.length > 0) { setActiveFieldId(myFields[0].id); setScreen("events"); }
-          else setScreen("claim");
-        }}
-        onOpenEvent={(ev) => { setActiveFieldId(ev.fieldId); setEditingEvent(ev); setScreen("eventEdit"); }}
-        onLogout={handleLogout}
-      />
-    );
+    showNav = true;
+    if (activeTab === "events") {
+      content = (
+        <EventsHubScreen
+          myFields={myFields}
+          events={allMyEvents}
+          eventsLoading={allMyEventsLoading}
+          onNewEvent={(field) => openEventEdit(field, null)}
+          onEditEvent={openEventEdit}
+          onOpenRoster={openRoster}
+          deleteEvent={deleteEvent}
+          duplicateEvent={duplicateEvent}
+        />
+      );
+    } else if (activeTab === "analytics") {
+      content = (
+        <AnalyticsScreen
+          events={allMyEvents}
+          eventsLoading={allMyEventsLoading}
+          totalSignatures={totalSignatures}
+          activityLoading={activityLoading}
+        />
+      );
+    } else if (activeTab === "roster") {
+      content = <RosterHubScreen events={allMyEvents} eventsLoading={allMyEventsLoading} onOpenRoster={openRoster} />;
+    } else if (activeTab === "settings") {
+      content = (
+        <SettingsScreen
+          profile={profile}
+          user={user}
+          myFields={myFields}
+          updateOwnerName={updateOwnerName}
+          onOpenField={openField}
+          onOpenClaim={openClaim}
+          onLogout={handleLogout}
+        />
+      );
+    } else {
+      content = (
+        <DashboardScreen
+          profile={profile}
+          myFields={myFields}
+          myFieldsLoading={myFieldsLoading}
+          pendingFields={pendingFields}
+          pendingLoading={pendingLoading}
+          events={allMyEvents}
+          eventsLoading={allMyEventsLoading}
+          activity={activity}
+          activityLoading={activityLoading}
+          onOpenField={openField}
+          onOpenClaim={openClaim}
+          onOpenEventsList={() => setActiveTab("events")}
+          onOpenEvent={(ev) => openEventEdit(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)}
+          onLogout={handleLogout}
+        />
+      );
+    }
   }
 
   return (
     <div className="w-full h-screen flex flex-col" style={{ background: T.void }}>
       <style>{FONTS}</style>
-      <div className="flex-1 min-h-0 relative">{content}</div>
+      <div className="flex-1 min-h-0 relative">
+        {content}
+        {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Every event across this owner's claimed field(s) — if they own more than
@@ -17,10 +17,19 @@ export function useOwnerEvents(fieldIds) {
     }
     // Firestore's "in" filter caps at 10 values — plenty of headroom for
     // how many fields one owner realistically claims in this v1.
+    //
+    // Sorting is done client-side below rather than via orderBy("date") in
+    // the query itself — combining a where("fieldId", "in", ...) filter
+    // with orderBy on a DIFFERENT field requires a Firestore composite
+    // index that was never created, which made this query fail silently
+    // (caught by the error handler, leaving events permanently empty) —
+    // exactly the "created events don't show up" bug.
     const unsub = onSnapshot(
-      query(collection(db, "events"), where("fieldId", "in", fieldIds.slice(0, 10)), orderBy("date")),
+      query(collection(db, "events"), where("fieldId", "in", fieldIds.slice(0, 10))),
       (snap) => {
-        setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+        setEvents(list);
         setLoading(false);
       },
       (err) => {
