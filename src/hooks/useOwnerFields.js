@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Every field, for the "claim a field" search/browse flow. Same public
@@ -118,4 +118,42 @@ export function useFieldActions() {
   }
 
   return { claimField, updateFieldProfile };
+}
+
+// Banned players for a specific field — private to that field's owner.
+export function useBannedPlayers(fieldId) {
+  const [banned, setBanned] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!fieldId) {
+      setBanned([]);
+      setLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, "fields", fieldId, "bannedPlayers"),
+      (snap) => {
+        setBanned(snap.docs.map((d) => ({ uid: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("useBannedPlayers error:", err);
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [fieldId]);
+
+  return { banned, bannedLoading: loading };
+}
+
+export function useBanActions() {
+  async function banPlayer(fieldId, uid, name) {
+    await setDoc(doc(db, "fields", fieldId, "bannedPlayers", uid), { name, bannedAt: serverTimestamp() });
+  }
+  async function unbanPlayer(fieldId, uid) {
+    await deleteDoc(doc(db, "fields", fieldId, "bannedPlayers", uid));
+  }
+  return { banPlayer, unbanPlayer };
 }

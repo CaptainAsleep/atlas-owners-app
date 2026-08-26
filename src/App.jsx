@@ -5,7 +5,7 @@ import {
   Settings, Users, LayoutDashboard,
 } from "lucide-react";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
-import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions } from "./hooks/useOwnerFields";
+import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { db, storage } from "./lib/firebase";
@@ -42,9 +42,29 @@ function localDateStr(d = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+// Haversine formula — straight-line distance in miles between two points.
+function distanceMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.8;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function parsePrice(str) {
   const m = (str || "").match(/[\d.]+/);
   return m ? parseFloat(m[0]) : null;
+}
+
+// Defensive display formatting — if a price was ever stored as a bare
+// number (no $ prefix), show it with one rather than a confusing bare
+// digit. Doesn't touch the stored value, just how it renders.
+function displayPrice(price) {
+  if (!price) return price;
+  const trimmed = String(price).trim();
+  return /^\d/.test(trimmed) ? `$${trimmed}` : trimmed;
 }
 
 // Same client-side resize used throughout the player app — shrink before
@@ -97,7 +117,23 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
         type={rows ? undefined : type}
         rows={rows}
         className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none"
-        style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, resize: rows ? "none" : undefined }}
+        style={{
+          ...body,
+          background: T.panelAlt,
+          border: `1px solid ${T.line}`,
+          borderRadius: 4,
+          color: T.ash,
+          resize: rows ? "none" : undefined,
+          colorScheme: "light",
+          // Defensive against a real Safari quirk we hit before: native
+          // date inputs have a minimum content width that can silently
+          // beat a plain width:100% and overflow their container. These
+          // are harmless for every other input type too.
+          boxSizing: "border-box",
+          minWidth: 0,
+          maxWidth: "100%",
+          display: "block",
+        }}
       />
     </div>
   );
@@ -189,7 +225,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onOpenEvent, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onLogout }) {
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -247,7 +283,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
         )}
 
         <div className="mb-4">
-          <PrimaryButton onClick={onOpenEventsList} tone="ash">+ Create New Event</PrimaryButton>
+          <PrimaryButton onClick={onCreateEvent} tone="ash">+ Create New Event</PrimaryButton>
         </div>
 
         {upcoming.length > 0 && (
@@ -447,6 +483,25 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  // Captured once, at mount — compared against current state to decide
+  // whether Save should even be tappable. Updated after a successful save
+  // so the button correctly disables again until something new changes.
+  const [snapshot, setSnapshot] = useState({
+    imageUrl: field.imageUrl || null, name: field.name || "", address: field.address || "",
+    phone: field.phone || "", email: field.email || "", website: field.website || "",
+    about: field.about || "", hours: field.hours || "", amenities: field.amenities || [],
+    rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
+    chronoSniper: field.chrono?.sniper || "", chronoDmr: field.chrono?.dmr || "", rentals: field.rentals || [],
+  });
+  const hasChanges =
+    imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
+    phone !== snapshot.phone || email !== snapshot.email || website !== snapshot.website ||
+    about !== snapshot.about || hours !== snapshot.hours ||
+    JSON.stringify(amenities) !== JSON.stringify(snapshot.amenities) ||
+    rulesText !== snapshot.rulesText || chronoAeg !== snapshot.chronoAeg ||
+    chronoSniper !== snapshot.chronoSniper || chronoDmr !== snapshot.chronoDmr ||
+    JSON.stringify(rentals) !== JSON.stringify(snapshot.rentals);
+
   const toggleAmenity = (a) => {
     setAmenities(amenities.includes(a) ? amenities.filter((x) => x !== a) : [...amenities, a]);
   };
@@ -530,6 +585,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       await updateFieldProfile(field.id, {
         name, address, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
       });
+      setSnapshot({ imageUrl, name, address, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -695,7 +751,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved — live on the player app now.</p>}
         <div className="mb-6">
-          <PrimaryButton onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Profile Changes"}</PrimaryButton>
+          <PrimaryButton onClick={handleSave} disabled={saving || !hasChanges}>{saving ? "Saving…" : "Save Profile Changes"}</PrimaryButton>
         </div>
       </div>
     </div>
@@ -709,7 +765,7 @@ const GAME_TYPES = [
   { key: "TOURNAMENT", label: "Tournament" },
 ];
 
-function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, newEventId }) {
+function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, newEventId, allFields }) {
   const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
   const [date, setDate] = useState(existing?.date || "");
@@ -720,16 +776,45 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [type, setType] = useState(existing?.type || "OUTDOOR");
   const [description, setDescription] = useState(existing?.description || "");
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl || null);
+  const [waiverText, setWaiverText] = useState(existing?.waiver?.text || "");
+  const [patchName, setPatchName] = useState(existing?.checkInPatch?.name || "");
+  const [patchImageUrl, setPatchImageUrl] = useState(existing?.checkInPatch?.imageUrl || null);
+  const [patchUploading, setPatchUploading] = useState(false);
+  const patchInputRef = React.useRef(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Only meaningful when editing an existing event — a brand new one has
+  // nothing to compare against, so it's always considered "changed."
+  const [snapshot, setSnapshot] = useState({
+    title: existing?.title || "", date: existing?.date || "", endDate: existing?.endDate || "",
+    startTime: existing?.startTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
+    type: existing?.type || "OUTDOOR", description: existing?.description || "", imageUrl: existing?.imageUrl || null,
+  });
+  const hasChanges = !existing ||
+    title !== snapshot.title || date !== snapshot.date || endDate !== snapshot.endDate ||
+    startTime !== snapshot.startTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
+    type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
+    waiverText !== (existing?.waiver?.text || "") ||
+    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null);
+  // Publishing a currently-unchanged draft is still a real, meaningful
+  // action (draft → published) even with zero content edits — Save as
+  // Draft has no such case, since re-saving identical draft content really
+  // is a no-op.
+  const canPublish = hasChanges || existing?.draft;
+
   // A lightweight, one-time heads-up (not a live listener — this is just
   // advisory, not something that needs to stay in sync while editing) —
   // shows other fields' events landing on the same date, so an owner isn't
   // accidentally scheduling head-to-head against a nearby field's big game.
-  // Purely informational; never blocks saving or publishing.
+  // Geofenced to 100 miles so this stays useful once there are thousands of
+  // events nationally — a field in another state landing on the same date
+  // is irrelevant noise, not a real conflict. Purely informational; never
+  // blocks saving or publishing. If either field is missing coordinates,
+  // that candidate is left out rather than guessed at — an unverifiable
+  // distance is exactly the kind of noise this is meant to avoid.
   const [competingEvents, setCompetingEvents] = useState([]);
   useEffect(() => {
     if (!date) {
@@ -742,7 +827,13 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         if (cancelled) return;
         const others = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((e) => e.fieldId !== field.id && !e.draft && e.id !== eventId);
+          .filter((e) => e.fieldId !== field.id && !e.draft && e.id !== eventId)
+          .filter((e) => {
+            if (typeof field.lat !== "number" || typeof field.lng !== "number") return false;
+            const otherField = allFields.find((f) => f.id === e.fieldId);
+            if (!otherField || typeof otherField.lat !== "number" || typeof otherField.lng !== "number") return false;
+            return distanceMiles(field.lat, field.lng, otherField.lat, otherField.lng) <= 100;
+          });
         setCompetingEvents(others);
       })
       .catch((err) => console.error("competing events check failed:", err));
@@ -776,6 +867,26 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     }
   };
 
+  const handlePatchPick = () => patchInputRef.current?.click();
+  const handlePatchSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPatchUploading(true);
+    setError("");
+    try {
+      const resized = await resizeImageFile(file, 500, 0.9);
+      const storageRef = ref(storage, `eventPatches/${field.id}/${eventId}/patch.jpg`);
+      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      setPatchImageUrl(url);
+    } catch (err) {
+      setError("Couldn't upload that patch — try again.");
+    } finally {
+      setPatchUploading(false);
+    }
+  };
+
   const buildData = (draft) => ({
     title: title.trim(),
     date,
@@ -786,6 +897,14 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     type,
     description: description.trim(),
     imageUrl: imageUrl || null,
+    // Same shape the player app's waiver-signing flow already reads
+    // (version/text/isDemo). isDemo: false since this is a real waiver an
+    // owner actually wrote, not the app's placeholder showcase text.
+    waiver: waiverText.trim() ? { text: waiverText.trim(), version: localDateStr(), isDemo: false } : null,
+    // Setup only — nothing grants this to a player yet, since that needs
+    // real check-in scanning, which doesn't exist. The attachment itself
+    // is real, though, and ready for when granting is built.
+    checkInPatch: patchName.trim() && patchImageUrl ? { name: patchName.trim(), imageUrl: patchImageUrl } : null,
     // Deliberately no sourceUrl here — an event created directly in the app
     // has no "original listing" elsewhere to link to. The player app only
     // shows that link when sourceUrl is genuinely set (scraped events).
@@ -847,24 +966,23 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
         <Eyebrow>Event Details</Eyebrow>
         <TextField label="Event Name" value={title} onChange={setTitle} placeholder="e.g. Saturday Woods CQB Classic" />
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <TextField label="Date" value={date} onChange={setDate} type="date" />
-          </div>
-          <div className="flex-1">
+        <div className="flex flex-col gap-2 mb-3">
+          <TextField label="Date" value={date} onChange={setDate} type="date" />
+          <div>
             <TextField label="End Date (optional)" value={endDate} onChange={setEndDate} type="date" />
+            <p className="text-[10px] -mt-2" style={{ ...body, color: T.ashFaint }}>Leave blank for a single-day event.</p>
           </div>
         </div>
 
         {competingEvents.length > 0 && (
           <div className="mb-3 p-3" style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}>
             <div className="text-[12px] font-semibold mb-1" style={{ ...display, color: T.ash }}>
-              {competingEvents.length === 1 ? "Another field has an event this same day" : `${competingEvents.length} other events land on this same day`}
+              {competingEvents.length === 1 ? "A nearby field has an event this same day" : `${competingEvents.length} nearby events land on this same day`}
             </div>
             {competingEvents.map((ev) => (
               <div key={ev.id} className="text-[11px]" style={{ ...body, color: T.ashDim }}>{ev.title} — {ev.fieldName}</div>
             ))}
-            <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>Just a heads-up — players can only be at one event at a time. Not a blocker.</p>
+            <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>Within 100 miles — players can only be at one event at a time. Just a heads-up, not a blocker.</p>
           </div>
         )}
 
@@ -903,16 +1021,52 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
         <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
+        <Eyebrow>Waiver</Eyebrow>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Players will read and e-sign this text before the event. Leave blank if this event doesn't need one.
+          Document upload isn't available yet — a real, complete document would need to be embedded and made
+          signable in-app to actually work, which is a bigger piece; entering the text directly here works today.
+        </p>
+        <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder="Paste or write your field's waiver text here…" />
+
+        <Eyebrow>Check-In Reward Patch</Eyebrow>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Attach a patch here now — granting it to players on check-in isn't live yet, since that needs the QR
+          scanner, which doesn't exist yet. This just sets it up for when it does.
+        </p>
+        <input ref={patchInputRef} type="file" accept="image/*" onChange={handlePatchSelected} className="hidden" />
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={handlePatchPick}
+            disabled={patchUploading}
+            className="w-16 h-16 flex-shrink-0 flex items-center justify-center"
+            style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 4 }}
+          >
+            {patchImageUrl ? (
+              <img src={patchImageUrl} alt="" className="w-full h-full" style={{ objectFit: "contain" }} />
+            ) : (
+              <ImageIcon size={16} color={patchUploading ? T.ashFaint : T.ashDim} />
+            )}
+          </button>
+          <input
+            value={patchName}
+            onChange={(e) => setPatchName(e.target.value)}
+            placeholder="Patch name"
+            className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
+            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+          />
+        </div>
+
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         <div className="mb-2">
-          <PrimaryButton onClick={() => handleSave(false)} disabled={saving}>{saving ? "Saving…" : "Publish Event"}</PrimaryButton>
+          <PrimaryButton onClick={() => handleSave(false)} disabled={saving || !canPublish}>{saving ? "Saving…" : "Publish Event"}</PrimaryButton>
         </div>
         <div className="mb-6">
           <button
             onClick={() => handleSave(true)}
-            disabled={saving}
+            disabled={saving || !hasChanges}
             className="w-full py-3 font-semibold text-[14px]"
-            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
+            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4, opacity: saving || !hasChanges ? 0.5 : 1 }}
           >
             Save as Draft
           </button>
@@ -923,8 +1077,9 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 }
 
 /* ---------- Roster (real waiver signatures) ---------- */
-function RosterScreen({ event, onBack }) {
+function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPlayer }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
+  const bannedUids = new Set(banned.map((b) => b.uid));
 
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
@@ -942,7 +1097,7 @@ function RosterScreen({ event, onBack }) {
           isn't the same as showing up. Real check-in tracking needs the QR scanner, which isn't built yet.
         </p>
 
-        {signaturesLoading ? (
+        {signaturesLoading || bannedLoading ? (
           <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
         ) : signatures.length === 0 ? (
           <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
@@ -950,14 +1105,59 @@ function RosterScreen({ event, onBack }) {
             <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>No signatures yet</div>
           </div>
         ) : (
-          signatures.map((s, i) => (
-            <div key={i} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-              <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{s.signedName}</div>
-              <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>
-                {s.signedAt?.toDate ? s.signedAt.toDate().toLocaleDateString() : ""}
+          signatures.map((s, i) => {
+            const isBanned = bannedUids.has(s.uid);
+            return (
+              <div key={i} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
+                <div>
+                  <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{s.signedName}</div>
+                  <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>
+                    {s.signedAt?.toDate ? s.signedAt.toDate().toLocaleDateString() : ""}
+                  </div>
+                </div>
+                {isBanned ? (
+                  <button
+                    onClick={() => unbanPlayer(event.fieldId, s.uid)}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold"
+                    style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
+                  >
+                    Unban
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => banPlayer(event.fieldId, s.uid, s.signedName)}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold"
+                    style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}
+                  >
+                    Ban
+                  </button>
+                )}
               </div>
+            );
+          })
+        )}
+
+        {banned.length > 0 && (
+          <>
+            <div className="mt-6 mb-2">
+              <Eyebrow>Banned From This Field</Eyebrow>
             </div>
-          ))
+            <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
+              There's no enforcement mechanism yet (that needs real check-in), but this list is saved and ready for when there is.
+            </p>
+            {banned.map((b) => (
+              <div key={b.uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{b.name}</div>
+                <button
+                  onClick={() => unbanPlayer(event.fieldId, b.uid)}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold"
+                  style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
+                >
+                  Unban
+                </button>
+              </div>
+            ))}
+          </>
         )}
       </div>
     </div>
@@ -992,14 +1192,18 @@ function OwnerBottomNav({ active, onNavigate }) {
 }
 
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
-function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent }) {
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent, updateEvent }) {
   const [tab, setTab] = useState("all");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmPublish, setConfirmPublish] = useState(null);
+  const [busy, setBusy] = useState(false);
   const today = localDateStr();
 
   const filtered = events.filter((ev) => {
     if (tab === "drafts") return ev.draft === true;
-    if (ev.draft) return false;
+    if (tab === "all") return true; // genuinely all — drafts included
+    if (ev.draft) return false; // Upcoming/Past are date-based buckets; a draft has no confirmed date to bucket by
     if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
     if (tab === "past") return (ev.endDate || ev.date) < today;
     return true;
@@ -1013,6 +1217,26 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   const handleNew = () => {
     const field = myFields.find((f) => f.id === pickerFieldId) || myFields[0];
     if (field) onNewEvent(field);
+  };
+
+  const handleConfirmDelete = async () => {
+    setBusy(true);
+    try {
+      await deleteEvent(confirmDelete.id);
+      setConfirmDelete(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmPublish = async () => {
+    setBusy(true);
+    try {
+      await updateEvent(confirmPublish.id, { draft: false });
+      setConfirmPublish(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -1077,7 +1301,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                   )}
                   <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                 </div>
-                {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.price}</div>}
+                {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
               </div>
               <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
                 {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
@@ -1095,7 +1319,12 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   <Copy size={12} />
                 </button>
-                <button onClick={() => deleteEvent(ev.id)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+                {ev.draft && (
+                  <button onClick={() => setConfirmPublish(ev)} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                    Publish
+                  </button>
+                )}
+                <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
                   Delete
                 </button>
               </div>
@@ -1103,6 +1332,44 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           ))
         )}
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmDelete(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Delete this event?</div>
+            <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+              "{confirmDelete.title}" will be permanently deleted. This can't be undone.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDelete(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmDelete} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmPublish && (
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmPublish(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Publish this event?</div>
+            <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+              "{confirmPublish.title}" will become visible to players immediately.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmPublish(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmPublish} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Publishing…" : "Publish"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1195,14 +1462,27 @@ function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField,
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  // profile arrives asynchronously — if it wasn't loaded yet at the exact
+  // moment this screen first mounted, the useState initializer above would
+  // have permanently locked "name" to an empty string. This keeps it in
+  // sync whenever the real profile actually shows up or changes.
+  useEffect(() => {
+    if (profile?.name) setName(profile.name);
+  }, [profile?.name]);
 
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
+    setError("");
     try {
       await updateOwnerName(name.trim());
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error("updateOwnerName failed:", err);
+      setError(`Couldn't save: ${err.code || err.message || "unknown error"}`);
     } finally {
       setSaving(false);
     }
@@ -1219,9 +1499,10 @@ function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField,
         <TextField label="Your Name" value={name} onChange={setName} />
         <p className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Email</p>
         <p className="text-[13px] mb-3" style={{ ...body, color: T.ashDim }}>{user?.email}</p>
+        {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved.</p>}
         <div className="mb-6">
-          <PrimaryButton onClick={handleSave} disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
+          <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
 
         <div className="mb-4 flex items-center justify-between">
@@ -1280,6 +1561,8 @@ export default function App() {
   const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
   const { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId } = useOwnerEventActions();
   const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
+  const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
+  const { banPlayer, unbanPlayer } = useBanActions();
 
   const openField = (fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); };
   const openClaim = () => setOverlay("claim");
@@ -1337,10 +1620,20 @@ export default function App() {
         createEvent={createEvent}
         updateEvent={updateEvent}
         newEventId={newEventId}
+        allFields={allFields}
       />
     );
   } else if (overlay === "roster" && rosterEvent) {
-    content = <RosterScreen event={rosterEvent} onBack={closeOverlay} />;
+    content = (
+      <RosterScreen
+        event={rosterEvent}
+        onBack={closeOverlay}
+        banned={banned}
+        bannedLoading={bannedLoading}
+        banPlayer={banPlayer}
+        unbanPlayer={unbanPlayer}
+      />
+    );
   } else {
     showNav = true;
     if (activeTab === "events") {
@@ -1354,6 +1647,7 @@ export default function App() {
           onOpenRoster={openRoster}
           deleteEvent={deleteEvent}
           duplicateEvent={duplicateEvent}
+          updateEvent={updateEvent}
         />
       );
     } else if (activeTab === "analytics") {
@@ -1394,6 +1688,10 @@ export default function App() {
           onOpenField={openField}
           onOpenClaim={openClaim}
           onOpenEventsList={() => setActiveTab("events")}
+          onCreateEvent={() => {
+            if (myFields.length > 0) openEventEdit(myFields[0], null);
+            else openClaim();
+          }}
           onOpenEvent={(ev) => openEventEdit(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)}
           onLogout={handleLogout}
         />
