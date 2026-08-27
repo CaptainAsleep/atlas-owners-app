@@ -299,9 +299,14 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                     <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                     <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{ev.fieldName} — {ev.date}</div>
                   </div>
-                  {ev.interestCount > 0 && (
-                    <span className="text-[11px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>
-                  )}
+                  <div className="text-right">
+                    {typeof ev.maxCapacity === "number" && (
+                      <div className="text-[12px] font-semibold" style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</div>
+                    )}
+                    {ev.interestCount > 0 && (
+                      <span className="text-[10px]" style={{ ...mono, color: T.ashFaint }}>{ev.interestCount} interested</span>
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
@@ -1373,8 +1378,13 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
                 {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
               </div>
-              {ev.interestCount > 0 && (
-                <div className="text-[11px] font-semibold mb-3" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
+              {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
+                <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
+                  {typeof ev.maxCapacity === "number" && (
+                    <span style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</span>
+                  )}
+                  {ev.interestCount > 0 && <span style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>}
+                </div>
               )}
               <div className="flex gap-2 flex-wrap">
                 <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
@@ -1483,6 +1493,7 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
 function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoading }) {
   const published = events.filter((e) => !e.draft);
   const totalInterest = published.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+  const totalBooked = published.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
   const topEvents = [...published].filter((e) => e.interestCount > 0).sort((a, b) => (b.interestCount || 0) - (a.interestCount || 0)).slice(0, 5);
 
   return (
@@ -1499,11 +1510,15 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : published.length}</div>
           </div>
           <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Booked</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
+          </div>
+          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
           </div>
-          <div className="p-4 col-span-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Waiver Signatures</div>
+          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Waiver Signatures</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{activityLoading ? "…" : totalSignatures}</div>
           </div>
         </div>
