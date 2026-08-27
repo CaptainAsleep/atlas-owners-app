@@ -464,6 +464,12 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const bannerInputRef = React.useRef(null);
   const [name, setName] = useState(field.name || "");
   const [address, setAddress] = useState(field.address || "");
+  // field.city is stored (and read by the player app) as a single combined
+  // "City, ST" string — split it here just for a better editing experience.
+  // Recombined back into that same format on save, so the player app's
+  // existing display and state-filtering logic needs no changes at all.
+  const [city, setCity] = useState((field.city || "").split(",")[0]?.trim() || "");
+  const [state, setState] = useState((field.city || "").split(",")[1]?.trim() || "");
   const [phone, setPhone] = useState(field.phone || "");
   const [email, setEmail] = useState(field.email || "");
   const [website, setWebsite] = useState(field.website || "");
@@ -488,6 +494,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   // so the button correctly disables again until something new changes.
   const [snapshot, setSnapshot] = useState({
     imageUrl: field.imageUrl || null, name: field.name || "", address: field.address || "",
+    city: (field.city || "").split(",")[0]?.trim() || "", state: (field.city || "").split(",")[1]?.trim() || "",
     phone: field.phone || "", email: field.email || "", website: field.website || "",
     about: field.about || "", hours: field.hours || "", amenities: field.amenities || [],
     rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
@@ -495,6 +502,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   });
   const hasChanges =
     imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
+    city !== snapshot.city || state !== snapshot.state ||
     phone !== snapshot.phone || email !== snapshot.email || website !== snapshot.website ||
     about !== snapshot.about || hours !== snapshot.hours ||
     JSON.stringify(amenities) !== JSON.stringify(snapshot.amenities) ||
@@ -582,10 +590,11 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       const rules = rulesText.split("\n").map((s) => s.trim()).filter(Boolean);
       const chrono = (chronoAeg || chronoSniper || chronoDmr) ? { aeg: chronoAeg, sniper: chronoSniper, dmr: chronoDmr } : null;
       const cleanRentals = rentals.filter((r) => r.name.trim());
+      const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       await updateFieldProfile(field.id, {
-        name, address, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
+        name, address, city: combinedCity, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
       });
-      setSnapshot({ imageUrl, name, address, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals });
+      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -637,6 +646,14 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         <Eyebrow>Basic Information</Eyebrow>
         <TextField label="Field Name" value={name} onChange={setName} />
         <TextField label="Street Address" value={address} onChange={setAddress} />
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <TextField label="City" value={city} onChange={setCity} placeholder="Auburn" />
+          </div>
+          <div style={{ width: 90 }}>
+            <TextField label="State" value={state} onChange={setState} placeholder="MI" />
+          </div>
+        </div>
         {field.lat && (
           <p className="text-[10px] mb-3 -mt-2" style={{ ...body, color: T.ashFaint }}>
             Changing the address here won't move the map pin — that needs a separate re-geocoding pass. Contact support if the address changes significantly.
