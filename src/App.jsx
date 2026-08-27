@@ -1542,8 +1542,93 @@ function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField,
   );
 }
 
+function InstallGateScreen({ platform, deferredPrompt }) {
+  const [installing, setInstalling] = useState(false);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    setInstalling(true);
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    setInstalling(false);
+  };
+
+  return (
+    <div className="h-screen flex flex-col items-center justify-center px-8 text-center" style={flatBg}>
+      <style>{FONTS}</style>
+      <div className="w-16 h-16 flex items-center justify-center mb-4 overflow-hidden" style={{ borderRadius: 12 }}>
+        <img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="Atlas" className="w-full h-full" style={{ objectFit: "cover" }} />
+      </div>
+      <h1 className="text-[20px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Add Atlas Owners to your Home Screen</h1>
+      <p className="text-[14px] mb-6" style={{ ...body, color: T.ashDim, maxWidth: 320 }}>
+        This app works best installed — full screen and faster, especially for check-in on a tablet. Install it to continue.
+      </p>
+
+      {platform === "ios" ? (
+        <div className="w-full text-left" style={{ maxWidth: 320 }}>
+          <div className="flex items-center gap-3 mb-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>1</span>
+            <span className="text-[13px]" style={{ ...body, color: T.ash }}>Tap the Share button in Safari's toolbar</span>
+          </div>
+          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>2</span>
+            <span className="text-[13px]" style={{ ...body, color: T.ash }}>Scroll down and tap "Add to Home Screen"</span>
+          </div>
+        </div>
+      ) : deferredPrompt ? (
+        <button
+          onClick={handleInstallClick}
+          disabled={installing}
+          className="w-full py-3.5 font-semibold text-[14px]"
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, maxWidth: 320, opacity: installing ? 0.6 : 1 }}
+        >
+          {installing ? "Opening…" : "Install Atlas Owners"}
+        </button>
+      ) : (
+        <div className="w-full text-left" style={{ maxWidth: 320 }}>
+          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>1</span>
+            <span className="text-[13px]" style={{ ...body, color: T.ash }}>Open your browser's menu and tap "Add to Home Screen" or "Install App"</span>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] mt-6" style={{ ...body, color: T.ashFaint }}>Already installed? Open Atlas Owners from your Home Screen instead of this browser tab.</p>
+    </div>
+  );
+}
+
 /* ---------- App shell ---------- */
 export default function App() {
+  // Same gating logic as the player app: only phones and tablets (iPad
+  // matches the iOS check, Android tablets match the Android check) get
+  // hard-gated — desktop browsers don't have the same "installed app vs.
+  // browser tab" distinction. Tablets are deliberately included here, not
+  // excluded, since check-in on a tablet was the whole reason this app
+  // needs to work as a real installed app in the first place.
+  const [installGate, setInstallGate] = useState(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
+
+  useEffect(() => {
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    const ua = navigator.userAgent;
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+
+    if (isStandalone || (!isIOS && !isAndroid)) {
+      setInstallGate(false);
+      return;
+    }
+    setInstallGate(isIOS ? "ios" : "android");
+
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
   const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName } = useOwnerAuth();
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
@@ -1575,6 +1660,13 @@ export default function App() {
     setActiveTab("dashboard");
     setOverlay(null);
   };
+
+  if (installGate === null) {
+    return null; // brief instant while the install check resolves — nothing flashes before it
+  }
+  if (installGate) {
+    return <InstallGateScreen platform={installGate} deferredPrompt={deferredInstallPrompt} />;
+  }
 
   if (authLoading) {
     return (
