@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard,
+  Settings, Users, LayoutDashboard, Pencil,
 } from "lucide-react";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
@@ -1310,8 +1310,8 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 <div className="text-[11px] font-semibold mb-3" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
               )}
               <div className="flex gap-2 flex-wrap">
-                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                  Edit
+                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="flex-1 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                  <Pencil size={14} />
                 </button>
                 <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   <FileSignature size={12} /> Waivers
@@ -1324,8 +1324,8 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                     Publish
                   </button>
                 )}
-                <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
-                  Delete
+                <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+                  <Trash2 size={14} />
                 </button>
               </div>
             </div>
