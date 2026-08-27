@@ -837,6 +837,11 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [patchImageUrl, setPatchImageUrl] = useState(existing?.checkInPatch?.imageUrl || null);
   const [patchUploading, setPatchUploading] = useState(false);
   const patchInputRef = React.useRef(null);
+  const [teamThreshold, setTeamThreshold] = useState(existing?.teamCheckInReward?.threshold || "");
+  const [teamPatchName, setTeamPatchName] = useState(existing?.teamCheckInReward?.patch?.name || "");
+  const [teamPatchImageUrl, setTeamPatchImageUrl] = useState(existing?.teamCheckInReward?.patch?.imageUrl || null);
+  const [teamPatchUploading, setTeamPatchUploading] = useState(false);
+  const teamPatchInputRef = React.useRef(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
@@ -854,7 +859,10 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     startTime !== snapshot.startTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     waiverText !== (existing?.waiver?.text || "") ||
-    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null);
+    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
+    teamThreshold !== (existing?.teamCheckInReward?.threshold || "") ||
+    teamPatchName !== (existing?.teamCheckInReward?.patch?.name || "") ||
+    teamPatchImageUrl !== (existing?.teamCheckInReward?.patch?.imageUrl || null);
   // Publishing a currently-unchanged draft is still a real, meaningful
   // action (draft → published) even with zero content edits — Save as
   // Draft has no such case, since re-saving identical draft content really
@@ -943,6 +951,26 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     }
   };
 
+  const handleTeamPatchPick = () => teamPatchInputRef.current?.click();
+  const handleTeamPatchSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setTeamPatchUploading(true);
+    setError("");
+    try {
+      const resized = await resizeImageFile(file, 500, 0.9);
+      const storageRef = ref(storage, `eventPatches/${field.id}/${eventId}/team-patch.jpg`);
+      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      setTeamPatchImageUrl(url);
+    } catch (err) {
+      setError("Couldn't upload that patch — try again.");
+    } finally {
+      setTeamPatchUploading(false);
+    }
+  };
+
   const buildData = (draft) => ({
     title: title.trim(),
     date,
@@ -961,6 +989,9 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     // real check-in scanning, which doesn't exist. The attachment itself
     // is real, though, and ready for when granting is built.
     checkInPatch: patchName.trim() && patchImageUrl ? { name: patchName.trim(), imageUrl: patchImageUrl } : null,
+    teamCheckInReward: (teamThreshold && teamPatchName.trim() && teamPatchImageUrl)
+      ? { threshold: parseInt(teamThreshold, 10), patch: { name: teamPatchName.trim(), imageUrl: teamPatchImageUrl } }
+      : null,
     // Deliberately no sourceUrl here — an event created directly in the app
     // has no "original listing" elsewhere to link to. The player app only
     // shows that link when sourceUrl is genuinely set (scraped events).
@@ -1101,9 +1132,8 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
         <Eyebrow>Check-In Reward Patch</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
-          Attach a patch here now — granting it to players on check-in isn't live yet, since that needs the QR
-          scanner, which doesn't exist yet. This just sets it up for when it does. Name it like an achievement:
-          "[patch name]: [what earns it]" — e.g. "DTB: Attend 3 events at The Compound."
+          Attach a patch here and it's granted automatically the moment a player is scanned in. Name it like an
+          achievement: "[patch name]: [what earns it]" — e.g. "DTB: Attend 3 events at The Compound."
         </p>
         <input ref={patchInputRef} type="file" accept="image/*" onChange={handlePatchSelected} className="hidden" />
         <div className="flex items-center gap-3 mb-4">
@@ -1127,6 +1157,43 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
           />
         </div>
+
+        <Eyebrow>Team Check-In Reward</Eyebrow>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Reward a whole team once enough of them check in — e.g. "5 players from the same team check in, all 5 get
+          this patch." Works retroactively too: if 4 teammates already checked in before the 5th pushed the count
+          over the threshold, all 4 still get it, the next time they open the app.
+        </p>
+        <input ref={teamPatchInputRef} type="file" accept="image/*" onChange={handleTeamPatchSelected} className="hidden" />
+        <div className="flex items-center gap-3 mb-2">
+          <button
+            onClick={handleTeamPatchPick}
+            disabled={teamPatchUploading}
+            className="w-16 h-16 flex-shrink-0 flex items-center justify-center"
+            style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 4 }}
+          >
+            {teamPatchImageUrl ? (
+              <img src={teamPatchImageUrl} alt="" className="w-full h-full" style={{ objectFit: "contain" }} />
+            ) : (
+              <ImageIcon size={16} color={teamPatchUploading ? T.ashFaint : T.ashDim} />
+            )}
+          </button>
+          <input
+            value={teamPatchName}
+            onChange={(e) => setTeamPatchName(e.target.value)}
+            placeholder="e.g. DTB Squad: 5 teammates check in together"
+            className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
+            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+          />
+        </div>
+        <input
+          value={teamThreshold}
+          onChange={(e) => setTeamThreshold(e.target.value.replace(/\D/g, ""))}
+          placeholder="Number of teammates required (e.g. 5)"
+          type="number"
+          className="w-full mb-4 px-3 py-2.5 text-[14px] bg-transparent outline-none"
+          style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+        />
 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         <div className="mb-2">
