@@ -1096,7 +1096,8 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         <Eyebrow>Check-In Reward Patch</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
           Attach a patch here now — granting it to players on check-in isn't live yet, since that needs the QR
-          scanner, which doesn't exist yet. This just sets it up for when it does.
+          scanner, which doesn't exist yet. This just sets it up for when it does. Name it like an achievement:
+          "[patch name]: [what earns it]" — e.g. "DTB: Attend 3 events at The Compound."
         </p>
         <input ref={patchInputRef} type="file" accept="image/*" onChange={handlePatchSelected} className="hidden" />
         <div className="flex items-center gap-3 mb-4">
@@ -1115,7 +1116,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           <input
             value={patchName}
             onChange={(e) => setPatchName(e.target.value)}
-            placeholder="Patch name"
+            placeholder="e.g. DTB: Attend 3 events at The Compound"
             className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
             style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
           />
