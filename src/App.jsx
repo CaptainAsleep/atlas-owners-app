@@ -8,6 +8,7 @@ import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
+import { useEventBookings } from "./hooks/useEventBookings";
 import { db, storage } from "./lib/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -1149,7 +1150,31 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 /* ---------- Roster (real waiver signatures) ---------- */
 function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPlayer }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
+  const { bookings, bookingsLoading } = useEventBookings(event.id);
   const bannedUids = new Set(banned.map((b) => b.uid));
+
+  const renderPersonRow = (uid, name, dateValue) => {
+    const isBanned = bannedUids.has(uid);
+    return (
+      <div key={uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
+        <div>
+          <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{name}</div>
+          {dateValue?.toDate && (
+            <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>{dateValue.toDate().toLocaleDateString()}</div>
+          )}
+        </div>
+        {isBanned ? (
+          <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+            Unban
+          </button>
+        ) : (
+          <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+            Ban
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
@@ -1157,61 +1182,55 @@ function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPl
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
         </button>
-        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Waivers</h1>
+        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Roster</h1>
       </div>
 
       <div className="px-6 pt-4">
         <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{event.title}</div>
-        <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
-          Everyone who's signed the waiver for this event. This isn't a confirmed attendance list — signing a waiver
-          isn't the same as showing up. Real check-in tracking needs the QR scanner, which isn't built yet.
-        </p>
 
-        {signaturesLoading || bannedLoading ? (
-          <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
-        ) : signatures.length === 0 ? (
-          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-            <FileSignature size={22} color={T.ashDim} className="mb-2" />
-            <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>No signatures yet</div>
+        {typeof event.maxCapacity === "number" ? (
+          <div className="mb-4 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-[20px] font-semibold" style={{ ...display, color: T.good }}>{event.bookedCount || 0}</span>
+              <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} booked</span>
+            </div>
+            <div style={{ height: 6, background: T.panelAlt, borderRadius: 999, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(100, ((event.bookedCount || 0) / event.maxCapacity) * 100)}%`, background: T.good }} />
+            </div>
           </div>
         ) : (
-          signatures.map((s, i) => {
-            const isBanned = bannedUids.has(s.uid);
-            return (
-              <div key={i} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
-                <div>
-                  <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{s.signedName}</div>
-                  <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>
-                    {s.signedAt?.toDate ? s.signedAt.toDate().toLocaleDateString() : ""}
-                  </div>
-                </div>
-                {isBanned ? (
-                  <button
-                    onClick={() => unbanPlayer(event.fieldId, s.uid)}
-                    className="px-2.5 py-1.5 text-[11px] font-semibold"
-                    style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
-                  >
-                    Unban
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => banPlayer(event.fieldId, s.uid, s.signedName)}
-                    className="px-2.5 py-1.5 text-[11px] font-semibold"
-                    style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}
-                  >
-                    Ban
-                  </button>
-                )}
-              </div>
-            );
-          })
+          <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>No capacity limit set for this event.</p>
+        )}
+
+        <Eyebrow>Booked Players ({bookings.length})</Eyebrow>
+        {bookingsLoading ? (
+          <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : bookings.length === 0 ? (
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
+        ) : (
+          <div className="mb-5">
+            {bookings.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt))}
+          </div>
+        )}
+
+        <Eyebrow>Waiver Signatures ({signatures.length})</Eyebrow>
+        <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
+          Everyone who's signed the waiver, including anyone who signed without booking. Every booking above already
+          required a signature, so this list will always be a superset of Booked Players.
+        </p>
+        {signaturesLoading ? (
+          <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : signatures.length === 0 ? (
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No signatures yet.</p>
+        ) : (
+          <div className="mb-5">
+            {signatures.map((s, i) => renderPersonRow(s.uid || `sig-${i}`, s.signedName, s.signedAt))}
+          </div>
         )}
 
         {banned.length > 0 && (
           <>
-            <div className="mt-6 mb-2">
-              <Eyebrow>Banned From This Field</Eyebrow>
-            </div>
+            <Eyebrow>Banned From This Field</Eyebrow>
             <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
               There's no enforcement mechanism yet (that needs real check-in), but this list is saved and ready for when there is.
             </p>
@@ -1391,7 +1410,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                   <Pencil size={14} />
                 </button>
                 <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                  <FileSignature size={12} /> Waivers
+                  <Users size={12} /> Roster
                 </button>
                 <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   <Copy size={12} />
@@ -1460,7 +1479,7 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4">
         <div className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Roster</div>
-        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Pick an event to see who's signed its waiver.</p>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Pick an event to see who's booked and who's signed the waiver.</p>
       </div>
 
       <div className="px-6">
