@@ -482,6 +482,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [chronoSniper, setChronoSniper] = useState(field.chrono?.sniper || "");
   const [chronoDmr, setChronoDmr] = useState(field.chrono?.dmr || "");
   const [rentals, setRentals] = useState(field.rentals || []);
+  const [savedWaivers, setSavedWaivers] = useState(field.savedWaivers || []);
   const [gallery, setGallery] = useState(field.galleryPhotos || []);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const galleryInputRef = React.useRef(null);
@@ -499,6 +500,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     about: field.about || "", hours: field.hours || "", amenities: field.amenities || [],
     rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
     chronoSniper: field.chrono?.sniper || "", chronoDmr: field.chrono?.dmr || "", rentals: field.rentals || [],
+    savedWaivers: field.savedWaivers || [],
   });
   const hasChanges =
     imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
@@ -508,7 +510,8 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     JSON.stringify(amenities) !== JSON.stringify(snapshot.amenities) ||
     rulesText !== snapshot.rulesText || chronoAeg !== snapshot.chronoAeg ||
     chronoSniper !== snapshot.chronoSniper || chronoDmr !== snapshot.chronoDmr ||
-    JSON.stringify(rentals) !== JSON.stringify(snapshot.rentals);
+    JSON.stringify(rentals) !== JSON.stringify(snapshot.rentals) ||
+    JSON.stringify(savedWaivers) !== JSON.stringify(snapshot.savedWaivers);
 
   const toggleAmenity = (a) => {
     setAmenities(amenities.includes(a) ? amenities.filter((x) => x !== a) : [...amenities, a]);
@@ -527,6 +530,14 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     setRentals(next);
   };
   const removeRental = (i) => setRentals(rentals.filter((_, idx) => idx !== i));
+
+  const addSavedWaiver = () => setSavedWaivers([...savedWaivers, { name: "", text: "" }]);
+  const updateSavedWaiver = (i, key, value) => {
+    const next = [...savedWaivers];
+    next[i] = { ...next[i], [key]: value };
+    setSavedWaivers(next);
+  };
+  const removeSavedWaiver = (i) => setSavedWaivers(savedWaivers.filter((_, idx) => idx !== i));
 
   const handleBannerPick = () => bannerInputRef.current?.click();
   const handleBannerSelected = async (e) => {
@@ -593,8 +604,9 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       await updateFieldProfile(field.id, {
         name, address, city: combinedCity, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
+        savedWaivers: savedWaivers.filter((w) => w.name.trim() && w.text.trim()),
       });
-      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals });
+      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -762,6 +774,27 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
               className="w-full mb-2 px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
             <input value={r.availability} onChange={(e) => updateRental(i, "availability", e.target.value)} placeholder="Availability note"
               className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+          </div>
+        ))}
+
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Saved Waivers</label>
+          <button onClick={addSavedWaiver} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Add Waiver</button>
+        </div>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Save a waiver here once, then pick it from a list when creating an event instead of retyping it every time.
+        </p>
+        {savedWaivers.map((w, i) => (
+          <div key={i} className="mb-3 p-3" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+            <div className="flex gap-2 mb-2">
+              <input value={w.name} onChange={(e) => updateSavedWaiver(i, "name", e.target.value)} placeholder="e.g. Standard Waiver, MilSim Waiver"
+                className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <button onClick={() => removeSavedWaiver(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 4 }}>
+                <Trash2 size={14} color={T.alert} />
+              </button>
+            </div>
+            <textarea value={w.text} onChange={(e) => updateSavedWaiver(i, "text", e.target.value)} placeholder="Waiver text…" rows={5}
+              className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, resize: "none" }} />
           </div>
         ))}
 
@@ -1044,6 +1077,20 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           Document upload isn't available yet — a real, complete document would need to be embedded and made
           signable in-app to actually work, which is a bigger piece; entering the text directly here works today.
         </p>
+        {field.savedWaivers?.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {field.savedWaivers.map((w, i) => (
+              <button
+                key={i}
+                onClick={() => setWaiverText(w.text)}
+                className="px-3 py-1.5 text-[12px] font-medium"
+                style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 999 }}
+              >
+                {w.name}
+              </button>
+            ))}
+          </div>
+        )}
         <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder="Paste or write your field's waiver text here…" />
 
         <Eyebrow>Check-In Reward Patch</Eyebrow>
