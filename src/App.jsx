@@ -1296,8 +1296,10 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
             <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
               <div className="flex items-start justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  {ev.draft && (
+                  {ev.draft ? (
                     <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+                  ) : (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
                   )}
                   <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                 </div>
