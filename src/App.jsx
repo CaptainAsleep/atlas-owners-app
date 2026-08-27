@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
@@ -8,7 +8,7 @@ import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings } from "./hooks/useEventBookings";
+import { useEventBookings, checkInFromScan } from "./hooks/useEventBookings";
 import { db, storage } from "./lib/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -1148,17 +1148,106 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 }
 
 /* ---------- Roster (real waiver signatures) ---------- */
-function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPlayer }) {
+/* ---------- Check-in scanner ---------- */
+function CheckInScreen({ event, onBack }) {
+  const containerRef = useRef(null);
+  const scannerRef = useRef(null);
+  const [status, setStatus] = useState(null); // { ok, message }
+  const busyRef = useRef(false); // guards against handling the same frame twice while a scan is being processed
+
+  useEffect(() => {
+    let cancelled = false;
+    import("html5-qrcode").then(({ Html5Qrcode }) => {
+      if (cancelled || !containerRef.current) return;
+      const scanner = new Html5Qrcode(containerRef.current.id);
+      scannerRef.current = scanner;
+      scanner
+        .start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: 250 },
+          async (decodedText) => {
+            if (busyRef.current) return;
+            busyRef.current = true;
+            const result = await checkInFromScan(decodedText, event.id);
+            if (result.ok) {
+              setStatus({ ok: true, message: `${result.callsign} checked in` });
+            } else if (result.reason === "already-checked-in") {
+              setStatus({ ok: false, message: `${result.callsign} already checked in` });
+            } else if (result.reason === "wrong-event") {
+              setStatus({ ok: false, message: "That code is for a different event" });
+            } else if (result.reason === "not-booked") {
+              setStatus({ ok: false, message: "No booking found for that code" });
+            } else {
+              setStatus({ ok: false, message: "Not a valid Atlas check-in code" });
+            }
+            // Camera stays open the whole time — no need to close it just to
+            // show this. Brief pause before the next scan can register, so
+            // the same code held in frame doesn't fire repeatedly.
+            setTimeout(() => {
+              setStatus(null);
+              busyRef.current = false;
+            }, 2200);
+          },
+          () => {} // fires continuously while no code is in frame — nothing to do here
+        )
+        .catch((err) => {
+          console.error("scanner start failed:", err);
+          setStatus({ ok: false, message: "Couldn't access the camera — check permissions and try again." });
+        });
+    });
+    return () => {
+      cancelled = true;
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {}).finally(() => scannerRef.current?.clear());
+      }
+    };
+  }, [event.id]);
+
+  return (
+    <div className="h-full flex flex-col" style={{ background: "#000" }}>
+      <div className="px-6 pt-2 pb-4 flex items-center" style={{ background: T.panel, borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+          <ChevronLeft size={20} color={T.ash} />
+        </button>
+        <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{event.title}</h1>
+      </div>
+
+      <div id="atlas-qr-reader" ref={containerRef} className="flex-1 min-h-0" />
+
+      <div className="px-6 py-4" style={{ background: T.panel, borderTop: `1px solid ${T.line}` }}>
+        {status ? (
+          <div className="py-3 text-center font-semibold text-[14px]" style={{ ...display, color: status.ok ? T.good : T.alert }}>
+            {status.message}
+          </div>
+        ) : (
+          <div className="py-3 text-center text-[13px]" style={{ ...body, color: T.ashFaint }}>
+            Point the camera at a player's check-in QR code
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Roster ---------- */
+function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const bannedUids = new Set(banned.map((b) => b.uid));
 
-  const renderPersonRow = (uid, name, dateValue) => {
+  const renderPersonRow = (uid, name, dateValue, checkedIn) => {
     const isBanned = bannedUids.has(uid);
     return (
       <div key={uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
         <div>
-          <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{name}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{name}</div>
+            {checkedIn && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
+                <Check size={9} /> CHECKED IN
+              </span>
+            )}
+          </div>
           {dateValue?.toDate && (
             <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>{dateValue.toDate().toLocaleDateString()}</div>
           )}
@@ -1188,6 +1277,10 @@ function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPl
       <div className="px-6 pt-4">
         <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{event.title}</div>
 
+        <div className="mb-4">
+          <PrimaryButton onClick={onOpenCheckIn}>Scan to Check In</PrimaryButton>
+        </div>
+
         {typeof event.maxCapacity === "number" ? (
           <div className="mb-4 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="flex items-baseline justify-between mb-1.5">
@@ -1209,7 +1302,7 @@ function RosterScreen({ event, onBack, banned, bannedLoading, banPlayer, unbanPl
           <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
         ) : (
           <div className="mb-5">
-            {bookings.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt))}
+            {bookings.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt, b.checkedIn))}
           </div>
         )}
 
@@ -1754,6 +1847,7 @@ export default function App() {
   const openClaim = () => setOverlay("claim");
   const openEventEdit = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev || null); setOverlay("eventEdit"); };
   const openRoster = (ev) => { setRosterEvent(ev); setOverlay("roster"); };
+  const openCheckIn = () => setOverlay("checkIn");
   const closeOverlay = () => setOverlay(null);
 
   const handleLogout = async () => {
@@ -1821,12 +1915,15 @@ export default function App() {
       <RosterScreen
         event={rosterEvent}
         onBack={closeOverlay}
+        onOpenCheckIn={openCheckIn}
         banned={banned}
         bannedLoading={bannedLoading}
         banPlayer={banPlayer}
         unbanPlayer={unbanPlayer}
       />
     );
+  } else if (overlay === "checkIn" && rosterEvent) {
+    content = <CheckInScreen event={rosterEvent} onBack={() => setOverlay("roster")} />;
   } else {
     showNav = true;
     if (activeTab === "events") {
