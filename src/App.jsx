@@ -827,6 +827,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [date, setDate] = useState(existing?.date || "");
   const [endDate, setEndDate] = useState(existing?.endDate || "");
   const [startTime, setStartTime] = useState(existing?.startTime || "");
+  const [briefingTime, setBriefingTime] = useState(existing?.briefingTime || "");
   const [price, setPrice] = useState(existing?.price || "$");
   const [maxCapacity, setMaxCapacity] = useState(existing?.maxCapacity || "");
   const [type, setType] = useState(existing?.type || "OUTDOOR");
@@ -851,12 +852,12 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   // nothing to compare against, so it's always considered "changed."
   const [snapshot, setSnapshot] = useState({
     title: existing?.title || "", date: existing?.date || "", endDate: existing?.endDate || "",
-    startTime: existing?.startTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
+    startTime: existing?.startTime || "", briefingTime: existing?.briefingTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
     type: existing?.type || "OUTDOOR", description: existing?.description || "", imageUrl: existing?.imageUrl || null,
   });
   const hasChanges = !existing ||
     title !== snapshot.title || date !== snapshot.date || endDate !== snapshot.endDate ||
-    startTime !== snapshot.startTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
+    startTime !== snapshot.startTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     waiverText !== (existing?.waiver?.text || "") ||
     patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
@@ -976,6 +977,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     date,
     endDate: endDate || null,
     startTime: startTime || null,
+    briefingTime: briefingTime || null,
     price: price || null,
     maxCapacity: maxCapacity ? parseInt(maxCapacity, 10) : null,
     type,
@@ -1074,6 +1076,20 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         )}
 
         <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
+
+        <div className="mb-3">
+          <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Safety Briefing Time (optional)</label>
+          <input
+            type="time"
+            value={briefingTime}
+            onChange={(e) => setBriefingTime(e.target.value)}
+            className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none"
+            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+          />
+          <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>
+            A real time, separate from the text above — powers the "Early Bird" patch (checking in 30+ minutes early). Leave blank if not applicable.
+          </p>
+        </div>
 
         <div className="mb-3">
           <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Game Type</label>
