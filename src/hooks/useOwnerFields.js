@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Every field, for the "claim a field" search/browse flow. Same public
@@ -115,6 +115,17 @@ export function useFieldActions() {
   // renders these if present.
   async function updateFieldProfile(fieldId, fields) {
     await updateDoc(doc(db, "fields", fieldId), fields);
+    // Events store the field's name denormalized (fieldName) so the player
+    // app can display it without a join — same tradeoff already made for
+    // team names. That means a rename here needs to explicitly re-sync
+    // every one of this field's events, or they'd keep showing the old
+    // name forever. Same pattern already used for team renames.
+    if (fields.name) {
+      const eventsSnap = await getDocs(query(collection(db, "events"), where("fieldId", "==", fieldId)));
+      await Promise.all(
+        eventsSnap.docs.map((d) => updateDoc(doc(db, "events", d.id), { fieldName: fields.name }).catch(() => {}))
+      );
+    }
   }
 
   return { claimField, updateFieldProfile };
