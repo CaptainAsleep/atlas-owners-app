@@ -488,20 +488,30 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
 
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
-      <div className="h-40 relative" style={{ backgroundImage: field.imageUrl ? `url("${field.imageUrl}")` : undefined, backgroundSize: "cover", backgroundPosition: "center", background: field.imageUrl ? undefined : T.panelAlt }}>
-        <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-3">
-          <button onClick={onBack} className="w-9 h-9 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.9)", borderRadius: 4 }}>
-            <ChevronLeft color={T.ash} size={19} />
-          </button>
-          <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.9)", borderRadius: 4 }}>
-            <Pencil color={T.ash} size={16} />
-          </button>
-        </div>
+      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+          <ChevronLeft size={20} color={T.ash} />
+        </button>
+        <h1 className="flex-1 text-center text-[16px] font-semibold truncate px-2" style={{ ...display, color: T.ash }}>{field.name}</h1>
+        <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center">
+          <Pencil size={16} color={T.ash} />
+        </button>
       </div>
 
       <div className="px-6 pt-4">
-        <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{field.name}</h1>
-        {field.city && <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>{field.city}</p>}
+        <div className="flex items-center gap-3 mb-4">
+          {field.imageUrl ? (
+            <div className="w-12 h-12 flex-shrink-0" style={{ backgroundImage: `url("${field.imageUrl}")`, backgroundSize: "cover", backgroundPosition: "center", borderRadius: 8 }} />
+          ) : (
+            <div className="w-12 h-12 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 8 }}>
+              <ImageIcon size={18} color={T.ashFaint} />
+            </div>
+          )}
+          <div>
+            <div className="text-[15px] font-semibold" style={{ ...display, color: T.ash }}>{field.name}</div>
+            {field.city && <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{field.city}</div>}
+          </div>
+        </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
