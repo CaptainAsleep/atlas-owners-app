@@ -946,6 +946,87 @@ const GAME_TYPES = [
   { key: "TOURNAMENT", label: "Tournament" },
 ];
 
+// The real landing page when an owner taps into one of their events — a
+// summary with real stats, not straight into the edit form. Mirrors
+// FieldOverviewScreen's exact pattern: view first, edit is one tap away
+// via the pencil icon.
+function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
+  return (
+    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+          <ChevronLeft size={20} color={T.ash} />
+        </button>
+        <h1 className="flex-1 text-center text-[16px] font-semibold truncate px-2" style={{ ...display, color: T.ash }}>{ev.title}</h1>
+        <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center">
+          <Pencil size={16} color={T.ash} />
+        </button>
+      </div>
+
+      <div className="px-6 pt-4">
+        <div className="flex items-center gap-2 mb-1">
+          {ev.draft ? (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+          ) : (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
+          )}
+        </div>
+        <div className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{ev.title}</div>
+        <div className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
+          {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{ev.bookedCount || 0}{typeof ev.maxCapacity === "number" ? `/${ev.maxCapacity}` : ""}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Booked</div>
+          </div>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.interestCount || 0}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
+          </div>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.price ? displayPrice(ev.price) : "—"}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Price</div>
+          </div>
+        </div>
+
+        <button onClick={() => onOpenRoster(ev)} className="w-full mb-5 py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <Users size={15} color={T.ashDim} />
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>View Full Roster</span>
+        </button>
+
+        {ev.description && (
+          <>
+            <Eyebrow>Description</Eyebrow>
+            <p className="text-[13px] leading-relaxed mb-5" style={{ ...body, color: T.ashDim }}>{ev.description}</p>
+          </>
+        )}
+
+        {ev.checkInPatch?.imageUrl && (
+          <>
+            <Eyebrow>Check-In Reward Patch</Eyebrow>
+            <div className="p-3 flex items-center gap-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <img src={ev.checkInPatch.imageUrl} alt="" className="w-10 h-10" style={{ objectFit: "contain" }} />
+              <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.checkInPatch.name}</div>
+            </div>
+          </>
+        )}
+
+        {ev.waiver && (
+          <>
+            <Eyebrow>Waiver</Eyebrow>
+            <div className="p-3 flex items-center gap-2 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <FileSignature size={15} color={T.ashDim} />
+              <span className="text-[13px]" style={{ ...body, color: T.ashDim }}>Required for this event</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, newEventId, allFields }) {
   const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
@@ -1625,7 +1706,7 @@ function OwnerBottomNav({ active, onNavigate }) {
 }
 
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
-function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenRoster, deleteEvent, duplicateEvent, updateEvent }) {
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, duplicateEvent, updateEvent }) {
   const [tab, setTab] = useState("all");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1727,28 +1808,30 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
         ) : (
           filtered.map((ev) => (
             <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-              <div className="flex items-start justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  {ev.draft ? (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
-                  ) : (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
-                  )}
-                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+              <button onClick={() => onOpenOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="w-full text-left">
+                <div className="flex items-start justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    {ev.draft ? (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+                    ) : (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
+                    )}
+                    <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                  </div>
+                  {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
                 </div>
-                {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
-              </div>
-              <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
-                {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
-              </div>
-              {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
-                <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
-                  {typeof ev.maxCapacity === "number" && (
-                    <span style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</span>
-                  )}
-                  {ev.interestCount > 0 && <span style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>}
+                <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
+                  {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
                 </div>
-              )}
+                {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
+                  <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
+                    {typeof ev.maxCapacity === "number" && (
+                      <span style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</span>
+                    )}
+                    {ev.interestCount > 0 && <span style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>}
+                  </div>
+                )}
+              </button>
               <div className="flex gap-2 flex-wrap">
                 <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   <Pencil size={14} />
@@ -2086,6 +2169,7 @@ export default function App() {
   const openField = (fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); };
   const openClaim = () => setOverlay("claim");
   const openEventEdit = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev || null); setOverlay("eventEdit"); };
+  const openEventOverview = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev); setOverlay("eventOverview"); };
   const openRoster = (ev) => { setRosterEvent(ev); setOverlay("roster"); };
   const openCheckIn = () => setOverlay("checkIn");
   const closeOverlay = () => setOverlay(null);
@@ -2136,7 +2220,7 @@ export default function App() {
         eventsLoading={allMyEventsLoading}
         onBack={closeOverlay}
         onEdit={() => setOverlay("fieldEdit")}
-        onOpenEvent={(ev) => openEventEdit(activeField, ev)}
+        onOpenEvent={(ev) => openEventOverview(activeField, ev)}
         onCreateEvent={(field) => openEventEdit(field, null)}
       />
     );
@@ -2147,6 +2231,15 @@ export default function App() {
         onBack={() => setOverlay("field")}
         updateFieldProfile={updateFieldProfile}
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
+      />
+    );
+  } else if (overlay === "eventOverview" && activeField && editingEvent) {
+    content = (
+      <EventOverviewScreen
+        ev={editingEvent}
+        onBack={closeOverlay}
+        onEdit={() => openEventEdit(activeField, editingEvent)}
+        onOpenRoster={openRoster}
       />
     );
   } else if (overlay === "eventEdit" && activeField) {
@@ -2185,6 +2278,7 @@ export default function App() {
           eventsLoading={allMyEventsLoading}
           onNewEvent={(field) => openEventEdit(field, null)}
           onEditEvent={openEventEdit}
+          onOpenOverview={openEventOverview}
           onOpenRoster={openRoster}
           deleteEvent={deleteEvent}
           duplicateEvent={duplicateEvent}
@@ -2230,7 +2324,7 @@ export default function App() {
             if (myFields.length > 0) openEventEdit(myFields[0], null);
             else openClaim();
           }}
-          onOpenEvent={(ev) => openEventEdit(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)}
+          onOpenEvent={(ev) => openEventOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)}
           onLogout={handleLogout}
         />
       );
