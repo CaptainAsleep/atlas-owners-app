@@ -110,6 +110,12 @@ function Eyebrow({ children }) {
 
 function TextField({ label, value, onChange, placeholder, type = "text", rows }) {
   const Tag = rows ? "textarea" : "input";
+  // Native date/time widgets render their internal segments (day/month/
+  // year, hour/minute/AM-PM) at a size proportional to font-size — on some
+  // mobile browsers that internal rendering can ignore width constraints
+  // on the input itself entirely, so a smaller font is the one thing that
+  // actually shrinks what the browser draws, not just what CSS allows.
+  const isDateOrTime = type === "date" || type === "time";
   return (
     <div className="mb-3">
       {label && <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>{label}</label>}
@@ -119,7 +125,7 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
         placeholder={placeholder}
         type={rows ? undefined : type}
         rows={rows}
-        className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none"
+        className={`w-full ${isDateOrTime ? "px-2" : "px-3"} py-2.5 ${isDateOrTime ? "text-[13px]" : "text-[14px]"} bg-transparent outline-none`}
         style={{
           ...body,
           background: T.panelAlt,
@@ -1177,8 +1183,22 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             type="time"
             value={briefingTime}
             onChange={(e) => setBriefingTime(e.target.value)}
-            className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none"
-            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+            className="w-full px-2 py-2.5 text-[13px] bg-transparent outline-none"
+            style={{
+              ...body,
+              background: T.panelAlt,
+              border: `1px solid ${T.line}`,
+              borderRadius: 4,
+              color: T.ash,
+              colorScheme: "light",
+              // Same defensive properties as TextField's date/time
+              // handling — this input was built separately and never got
+              // them, which is very likely the real gap here.
+              boxSizing: "border-box",
+              minWidth: 0,
+              maxWidth: "100%",
+              display: "block",
+            }}
           />
           <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>
             A real time, separate from the text above — powers the "Early Bird" patch (checking in 30+ minutes early). Leave blank if not applicable.
