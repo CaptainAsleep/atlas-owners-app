@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X,
 } from "lucide-react";
+import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
+import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./legalText";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
@@ -464,6 +466,111 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
 /* ---------- Field profile editing ---------- */
 const PRESET_AMENITIES = ["Pro Shop", "Chrono Station", "HPA Refills", "Rentals Available", "Parking", "Restrooms", "Food/Drinks", "Accepts Credit/Debit Cards"];
 
+// The real landing page when an owner taps into one of their fields —
+// a summary with real numbers, not straight into the edit form. Editing
+// lives one tap away via the pencil icon in the header.
+function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onOpenEvent, onCreateEvent }) {
+  const [showDtbQr, setShowDtbQr] = useState(false);
+  const [dtbQrUrl, setDtbQrUrl] = useState(null);
+
+  const fieldEvents = events.filter((e) => e.fieldId === field.id);
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = fieldEvents.filter((e) => !e.draft && (e.endDate || e.date) >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const totalInterest = fieldEvents.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+  const totalBooked = fieldEvents.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
+
+  const handleShowDtbQr = () => {
+    if (!dtbQrUrl) {
+      QRCode.toDataURL("atlas:redeem:dtb", { width: 260, margin: 1, color: { dark: T.ash, light: "#FFFFFF" } }).then(setDtbQrUrl);
+    }
+    setShowDtbQr(true);
+  };
+
+  return (
+    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+      <div className="h-40 relative" style={{ backgroundImage: field.imageUrl ? `url("${field.imageUrl}")` : undefined, backgroundSize: "cover", backgroundPosition: "center", background: field.imageUrl ? undefined : T.panelAlt }}>
+        <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-3">
+          <button onClick={onBack} className="w-9 h-9 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.9)", borderRadius: 4 }}>
+            <ChevronLeft color={T.ash} size={19} />
+          </button>
+          <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.9)", borderRadius: 4 }}>
+            <Pencil color={T.ash} size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="px-6 pt-4">
+        <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{field.name}</h1>
+        {field.city && <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>{field.city}</p>}
+
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : upcoming.length}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Upcoming</div>
+          </div>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Booked</div>
+          </div>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-2">
+          <Eyebrow>Upcoming Events</Eyebrow>
+          <button onClick={() => onCreateEvent(field)} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ New Event</button>
+        </div>
+        {eventsLoading ? (
+          <p className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</p>
+        ) : upcoming.length === 0 ? (
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No upcoming published events.</p>
+        ) : (
+          <div className="flex flex-col gap-2 mb-5">
+            {upcoming.map((ev) => (
+              <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3 flex items-center justify-between text-left" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div>
+                  <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                  <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{ev.date}</div>
+                </div>
+                <ChevronRight size={16} color={T.ashFaint} />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {field.id === "the-compound" && (
+          <>
+            <Eyebrow>DTB Patch</Eyebrow>
+            <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+              Real players earn this automatically after 3 real check-ins here — this QR is a special, faster way to hand it to someone in person.
+            </p>
+            {!showDtbQr ? (
+              <button onClick={handleShowDtbQr} className="w-full py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <QrCode size={16} color={T.ashDim} />
+                <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Show DTB QR</span>
+              </button>
+            ) : (
+              <div className="p-4 flex flex-col items-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <button onClick={() => setShowDtbQr(false)} className="self-end -mt-1 -mr-1 w-7 h-7 flex items-center justify-center">
+                  <X size={16} color={T.ashFaint} />
+                </button>
+                {dtbQrUrl ? (
+                  <img src={dtbQrUrl} alt="DTB redemption code" className="w-56 h-56" />
+                ) : (
+                  <div className="w-56 h-56 flex items-center justify-center" style={{ color: T.ashFaint }}>Generating…</div>
+                )}
+                <p className="text-[11px] text-center mt-2" style={{ ...body, color: T.ashFaint }}>Have them scan this from their own Profile → Scan a Patch Code.</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) {
   const [imageUrl, setImageUrl] = useState(field.imageUrl || null);
   const [bannerUploading, setBannerUploading] = useState(false);
@@ -480,7 +587,6 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [email, setEmail] = useState(field.email || "");
   const [website, setWebsite] = useState(field.website || "");
   const [about, setAbout] = useState(field.about || "");
-  const [hours, setHours] = useState(field.hours || "");
   const [amenities, setAmenities] = useState(field.amenities || []);
   const [customAmenity, setCustomAmenity] = useState("");
   const [rulesText, setRulesText] = useState((field.rules || []).join("\n"));
@@ -503,7 +609,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     imageUrl: field.imageUrl || null, name: field.name || "", address: field.address || "",
     city: (field.city || "").split(",")[0]?.trim() || "", state: (field.city || "").split(",")[1]?.trim() || "",
     phone: field.phone || "", email: field.email || "", website: field.website || "",
-    about: field.about || "", hours: field.hours || "", amenities: field.amenities || [],
+    about: field.about || "", amenities: field.amenities || [],
     rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
     chronoSniper: field.chrono?.sniper || "", chronoDmr: field.chrono?.dmr || "", rentals: field.rentals || [],
     savedWaivers: field.savedWaivers || [],
@@ -512,7 +618,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
     city !== snapshot.city || state !== snapshot.state ||
     phone !== snapshot.phone || email !== snapshot.email || website !== snapshot.website ||
-    about !== snapshot.about || hours !== snapshot.hours ||
+    about !== snapshot.about ||
     JSON.stringify(amenities) !== JSON.stringify(snapshot.amenities) ||
     rulesText !== snapshot.rulesText || chronoAeg !== snapshot.chronoAeg ||
     chronoSniper !== snapshot.chronoSniper || chronoDmr !== snapshot.chronoDmr ||
@@ -609,10 +715,14 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       const cleanRentals = rentals.filter((r) => r.name.trim());
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       await updateFieldProfile(field.id, {
-        name, address, city: combinedCity, phone, email, website, about, hours, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
+        name, address, city: combinedCity, phone, email, website, about, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
+        // Explicitly cleared, not just omitted — hours are per-event now,
+        // not per-field, so this actively wipes any stale value already
+        // sitting on a field's document rather than leaving it dangling.
+        hours: null,
         savedWaivers: savedWaivers.filter((w) => w.name.trim() && w.text.trim()),
       });
-      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, hours, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers });
+      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -682,8 +792,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         <TextField label="Website" value={website} onChange={setWebsite} placeholder="https://yourfield.com" />
 
         <Eyebrow>About & Hours</Eyebrow>
-        <TextField label="About" value={about} onChange={setAbout} rows={3} placeholder="Tell players about your field…" />
-        <TextField label="Hours" value={hours} onChange={setHours} placeholder="e.g. Sat 9am–5pm, reservations required" />
+        <TextField label="About" value={about} onChange={setAbout} rows={4} placeholder="Tell players about your field — atmosphere, general hours, what to expect…" />
 
         <Eyebrow>Field Amenities</Eyebrow>
         <div className="flex flex-wrap gap-2 mb-2">
@@ -838,11 +947,6 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [patchImageUrl, setPatchImageUrl] = useState(existing?.checkInPatch?.imageUrl || null);
   const [patchUploading, setPatchUploading] = useState(false);
   const patchInputRef = React.useRef(null);
-  const [teamThreshold, setTeamThreshold] = useState(existing?.teamCheckInReward?.threshold || "");
-  const [teamPatchName, setTeamPatchName] = useState(existing?.teamCheckInReward?.patch?.name || "");
-  const [teamPatchImageUrl, setTeamPatchImageUrl] = useState(existing?.teamCheckInReward?.patch?.imageUrl || null);
-  const [teamPatchUploading, setTeamPatchUploading] = useState(false);
-  const teamPatchInputRef = React.useRef(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
   const [saving, setSaving] = useState(false);
@@ -860,10 +964,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     startTime !== snapshot.startTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     waiverText !== (existing?.waiver?.text || "") ||
-    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
-    teamThreshold !== (existing?.teamCheckInReward?.threshold || "") ||
-    teamPatchName !== (existing?.teamCheckInReward?.patch?.name || "") ||
-    teamPatchImageUrl !== (existing?.teamCheckInReward?.patch?.imageUrl || null);
+    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null);
   // Publishing a currently-unchanged draft is still a real, meaningful
   // action (draft → published) even with zero content edits — Save as
   // Draft has no such case, since re-saving identical draft content really
@@ -952,26 +1053,6 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     }
   };
 
-  const handleTeamPatchPick = () => teamPatchInputRef.current?.click();
-  const handleTeamPatchSelected = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setTeamPatchUploading(true);
-    setError("");
-    try {
-      const resized = await resizeImageFile(file, 500, 0.9);
-      const storageRef = ref(storage, `eventPatches/${field.id}/${eventId}/team-patch.jpg`);
-      await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
-      const url = await getDownloadURL(storageRef);
-      setTeamPatchImageUrl(url);
-    } catch (err) {
-      setError("Couldn't upload that patch — try again.");
-    } finally {
-      setTeamPatchUploading(false);
-    }
-  };
-
   const buildData = (draft) => ({
     title: title.trim(),
     date,
@@ -987,13 +1068,16 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     // (version/text/isDemo). isDemo: false since this is a real waiver an
     // owner actually wrote, not the app's placeholder showcase text.
     waiver: waiverText.trim() ? { text: waiverText.trim(), version: localDateStr(), isDemo: false } : null,
-    // Setup only — nothing grants this to a player yet, since that needs
-    // real check-in scanning, which doesn't exist. The attachment itself
-    // is real, though, and ready for when granting is built.
+    // Attach a patch here and it's granted automatically the moment a
+    // player is scanned in.
     checkInPatch: patchName.trim() && patchImageUrl ? { name: patchName.trim(), imageUrl: patchImageUrl } : null,
-    teamCheckInReward: (teamThreshold && teamPatchName.trim() && teamPatchImageUrl)
-      ? { threshold: parseInt(teamThreshold, 10), patch: { name: teamPatchName.trim(), imageUrl: teamPatchImageUrl } }
-      : null,
+    // Explicitly cleared, not just omitted — removed as an owner-configurable
+    // reward entirely; the equivalent (5+ registered teammates checking into
+    // the same event) is now the app-wide "Squad Catalyst" achievement
+    // instead, not something tied to any one field. Setting this to null on
+    // save actively clears any leftover value from earlier testing, rather
+    // than just leaving stale data sitting on the document untouched.
+    teamCheckInReward: null,
     // Deliberately no sourceUrl here — an event created directly in the app
     // has no "original listing" elsewhere to link to. The player app only
     // shows that link when sourceUrl is genuinely set (scraped events).
@@ -1025,7 +1109,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto overflow-x-hidden pb-10" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -1033,7 +1117,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{existing ? "Edit Event" : "Create New Event"}</h1>
       </div>
 
-      <div className="px-6 pt-4">
+      <div className="px-6 pt-4" style={{ maxWidth: "100%" }}>
         <Eyebrow>Event Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -1174,43 +1258,6 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           />
         </div>
 
-        <Eyebrow>Team Check-In Reward</Eyebrow>
-        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
-          Reward a whole team once enough of them check in — e.g. "5 players from the same team check in, all 5 get
-          this patch." Works retroactively too: if 4 teammates already checked in before the 5th pushed the count
-          over the threshold, all 4 still get it, the next time they open the app.
-        </p>
-        <input ref={teamPatchInputRef} type="file" accept="image/*" onChange={handleTeamPatchSelected} className="hidden" />
-        <div className="flex items-center gap-3 mb-2">
-          <button
-            onClick={handleTeamPatchPick}
-            disabled={teamPatchUploading}
-            className="w-16 h-16 flex-shrink-0 flex items-center justify-center"
-            style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 4 }}
-          >
-            {teamPatchImageUrl ? (
-              <img src={teamPatchImageUrl} alt="" className="w-full h-full" style={{ objectFit: "contain" }} />
-            ) : (
-              <ImageIcon size={16} color={teamPatchUploading ? T.ashFaint : T.ashDim} />
-            )}
-          </button>
-          <input
-            value={teamPatchName}
-            onChange={(e) => setTeamPatchName(e.target.value)}
-            placeholder="e.g. DTB Squad: 5 teammates check in together"
-            className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
-            style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
-          />
-        </div>
-        <input
-          value={teamThreshold}
-          onChange={(e) => setTeamThreshold(e.target.value.replace(/\D/g, ""))}
-          placeholder="Number of teammates required (e.g. 5)"
-          type="number"
-          className="w-full mb-4 px-3 py-2.5 text-[14px] bg-transparent outline-none"
-          style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
-        />
-
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         <div className="mb-2">
           <PrimaryButton onClick={() => handleSave(false)} disabled={saving || !canPublish}>{saving ? "Saving…" : "Publish Event"}</PrimaryButton>
@@ -1232,6 +1279,97 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
 /* ---------- Roster (real waiver signatures) ---------- */
 /* ---------- Check-in scanner ---------- */
+const LOADING_KEYFRAMES = `
+@keyframes loadingPulse {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
+  40% { transform: scale(1); opacity: 1; }
+}
+`;
+
+function LoadingScreen() {
+  return (
+    <div className="h-screen flex items-center justify-center" style={flatBg}>
+      <style>{FONTS}</style>
+      <style>{LOADING_KEYFRAMES}</style>
+      <div className="flex gap-2">
+        {[0, 0.15, 0.3].map((delay) => (
+          <div
+            key={delay}
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: 999,
+              background: T.accent,
+              animation: "loadingPulse 1.4s ease-in-out infinite",
+              animationDelay: `${delay}s`,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LegalAgreementScreen({ onAccept }) {
+  const [tab, setTab] = useState("terms");
+  const [checked, setChecked] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const TABS = [
+    { key: "terms", label: "Terms of Use", text: TERMS_OF_USE },
+    { key: "privacy", label: "Privacy Policy", text: PRIVACY_POLICY },
+    { key: "eula", label: "EULA", text: EULA },
+  ];
+  const activeText = TABS.find((t) => t.key === tab).text;
+
+  const handleAccept = async () => {
+    setSaving(true);
+    await onAccept();
+    setSaving(false);
+  };
+
+  return (
+    <div className="h-screen flex flex-col" style={flatBg}>
+      <style>{FONTS}</style>
+      <div className="px-6 pt-8 pb-3">
+        <h1 className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Before you continue</h1>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Please read and agree to the following.</p>
+      </div>
+      <div className="px-6 flex gap-1" style={{ borderBottom: `1px solid ${T.line}` }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className="px-2 py-2 text-[12px] font-semibold"
+            style={{ ...body, color: tab === t.key ? T.ash : T.ashFaint, borderBottom: tab === t.key ? `2px solid ${T.ash}` : "2px solid transparent" }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <p className="text-[12px] whitespace-pre-wrap" style={{ ...body, color: T.ashDim, lineHeight: 1.6 }}>{activeText}</p>
+      </div>
+      <div className="px-6 pt-3 pb-6" style={{ borderTop: `1px solid ${T.line}`, background: T.void }}>
+        <button onClick={() => setChecked(!checked)} className="w-full flex items-center gap-2 mb-3 text-left">
+          <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${checked ? T.ash : T.line}`, background: checked ? T.ash : "transparent", borderRadius: 4 }}>
+            {checked && <Check size={13} color="#fff" strokeWidth={3} />}
+          </div>
+          <span className="text-[12px]" style={{ ...body, color: T.ashDim }}>I've read and agree to the Terms of Use, Privacy Policy, and EULA.</span>
+        </button>
+        <button
+          onClick={handleAccept}
+          disabled={!checked || saving}
+          className="w-full py-3.5 font-semibold text-[14px]"
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: !checked || saving ? 0.5 : 1 }}
+        >
+          {saving ? "Continuing…" : "Agree & Continue"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CheckInScreen({ event, onBack }) {
   const containerRef = useRef(null);
   const scannerRef = useRef(null);
@@ -1735,7 +1873,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 }
 
 /* ---------- Settings ---------- */
-function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField, onOpenClaim, onLogout }) {
+function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1782,28 +1920,17 @@ function SettingsScreen({ profile, user, myFields, updateOwnerName, onOpenField,
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
-          <Eyebrow>My Fields</Eyebrow>
-          <button onClick={onOpenClaim} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Claim a Field</button>
-        </div>
-        {myFields.length === 0 ? (
-          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No fields claimed yet.</p>
-        ) : (
-          myFields.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => onOpenField(f.id)}
-              className="w-full mb-3 p-4 flex items-center gap-3 text-left"
-              style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
-            >
-              <div className="flex-1">
-                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
-                <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
-              </div>
-              <ChevronRight size={16} color={T.ashFaint} />
-            </button>
-          ))
-        )}
+        <Eyebrow>Support</Eyebrow>
+        <a
+          href="https://discord.gg/hR8EntGsq"
+          target="_blank"
+          rel="noreferrer"
+          className="w-full mb-6 p-4 flex items-center justify-between"
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}`, textDecoration: "none" }}
+        >
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Get help on Discord</span>
+          <ChevronRight size={16} color={T.ashFaint} />
+        </a>
 
         <div className="mt-4 mb-6">
           <button
@@ -1906,7 +2033,7 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms } = useOwnerAuth();
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
@@ -1947,12 +2074,7 @@ export default function App() {
   }
 
   if (authLoading) {
-    return (
-      <div className="h-screen flex items-center justify-center" style={flatBg}>
-        <style>{FONTS}</style>
-        <p className="text-[13px]" style={{ ...body, color: T.ashDim }}>Loading…</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   let content;
@@ -1960,6 +2082,10 @@ export default function App() {
 
   if (!user) {
     content = <LoginScreen signIn={signIn} signUp={signUp} />;
+  } else if (!profile) {
+    content = <LoadingScreen />;
+  } else if (profile.acceptedTermsVersion !== CURRENT_TERMS_VERSION) {
+    content = <LegalAgreementScreen onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
   } else if (overlay === "claim") {
     content = (
       <ClaimFieldScreen
@@ -1974,9 +2100,21 @@ export default function App() {
     );
   } else if (overlay === "field" && activeField) {
     content = (
+      <FieldOverviewScreen
+        field={activeField}
+        events={allMyEvents}
+        eventsLoading={allMyEventsLoading}
+        onBack={closeOverlay}
+        onEdit={() => setOverlay("fieldEdit")}
+        onOpenEvent={(ev) => openEventEdit(activeField, ev)}
+        onCreateEvent={(field) => openEventEdit(field, null)}
+      />
+    );
+  } else if (overlay === "fieldEdit" && activeField) {
+    content = (
       <FieldManageScreen
         field={activeField}
-        onBack={closeOverlay}
+        onBack={() => setOverlay("field")}
         updateFieldProfile={updateFieldProfile}
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
       />
@@ -2039,10 +2177,7 @@ export default function App() {
         <SettingsScreen
           profile={profile}
           user={user}
-          myFields={myFields}
           updateOwnerName={updateOwnerName}
-          onOpenField={openField}
-          onOpenClaim={openClaim}
           onLogout={handleLogout}
         />
       );

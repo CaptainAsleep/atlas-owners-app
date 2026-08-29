@@ -28,7 +28,22 @@ export function useOwnerAuth() {
       return;
     }
     const unsub = onSnapshot(doc(db, "owners", user.uid), (snap) => {
-      setProfile(snap.exists() ? snap.data() : null);
+      if (snap.exists()) {
+        setProfile(snap.data());
+      } else {
+        // Self-healing backfill, same pattern used for player profiles —
+        // an owner account can end up here if it ever signed in without
+        // going through the normal signUp doc-creation step (e.g. the
+        // same email/password already existed as a Firebase Auth user
+        // from another app). Creates a real doc with sensible defaults
+        // instead of leaving every future save broken.
+        const fallbackName = user.displayName || user.email?.split("@")[0] || "Owner";
+        setDoc(doc(db, "owners", user.uid), {
+          email: user.email,
+          name: fallbackName,
+          createdAt: serverTimestamp(),
+        }).catch((err) => console.error("owner doc backfill failed:", err));
+      }
     });
     return unsub;
   }, [user]);
@@ -54,9 +69,20 @@ export function useOwnerAuth() {
 
   async function updateOwnerName(name) {
     if (!auth.currentUser) return;
-    await updateDoc(doc(db, "owners", auth.currentUser.uid), { name });
+    // merge:true instead of updateDoc — self-healing even if the backfill
+    // above somehow hasn't run yet by the time this fires.
+    await setDoc(doc(db, "owners", auth.currentUser.uid), { name }, { merge: true });
     await updateProfile(auth.currentUser, { displayName: name });
   }
 
-  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName };
+  async function acceptTerms(version) {
+    if (!auth.currentUser) return;
+    await setDoc(
+      doc(db, "owners", auth.currentUser.uid),
+      { acceptedTermsVersion: version, acceptedTermsAt: serverTimestamp() },
+      { merge: true }
+    );
+  }
+
+  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms };
 }
