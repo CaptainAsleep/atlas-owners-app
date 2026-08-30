@@ -1505,10 +1505,42 @@ function LegalAgreementScreen({ onAccept }) {
   );
 }
 
+// Generated tones, not an audio file — no asset to bundle or host, and it
+// works identically everywhere. A single clean tone for success, two quick
+// low ones for a miss — standard "good/bad" sound-design convention.
+function playFeedbackSound(success) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beep = (freq, startTime, duration) => {
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      oscillator.type = "sine";
+      oscillator.frequency.value = freq;
+      gainNode.gain.setValueAtTime(0.001, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.3, startTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration);
+    };
+    if (success) {
+      beep(880, ctx.currentTime, 0.18);
+    } else {
+      beep(220, ctx.currentTime, 0.12);
+      beep(220, ctx.currentTime + 0.16, 0.12);
+    }
+  } catch (err) {
+    // Audio unavailable for some reason — visual feedback still carries
+    // the message, so this never blocks the actual check-in.
+  }
+}
+
 function CheckInScreen({ event, onBack }) {
   const containerRef = useRef(null);
   const scannerRef = useRef(null);
   const [status, setStatus] = useState(null); // { ok, message }
+  const [flash, setFlash] = useState(null); // "good" | "alert" — brief full-screen color pulse over the still-live camera
   const busyRef = useRef(false); // guards against handling the same frame twice while a scan is being processed
 
   useEffect(() => {
@@ -1536,11 +1568,21 @@ function CheckInScreen({ event, onBack }) {
             } else {
               setStatus({ ok: false, message: "Not a valid Atlas check-in code" });
             }
+            // The real, reliable confirmation — works identically on every
+            // device. navigator.vibrate() is a free bonus layered on top:
+            // it does nothing at all on iPhone (iOS Safari has never
+            // implemented the Vibration API), but it's a real, distinct
+            // buzz on Android. Sound and the flash below are what this
+            // actually depends on.
+            playFeedbackSound(result.ok);
+            setFlash(result.ok ? "good" : "alert");
+            if (navigator.vibrate) navigator.vibrate(result.ok ? 120 : [80, 80, 80]);
             // Camera stays open the whole time — no need to close it just to
             // show this. Brief pause before the next scan can register, so
             // the same code held in frame doesn't fire repeatedly.
             setTimeout(() => {
               setStatus(null);
+              setFlash(null);
               busyRef.current = false;
             }, 2200);
           },
@@ -1560,7 +1602,13 @@ function CheckInScreen({ event, onBack }) {
   }, [event.id]);
 
   return (
-    <div className="h-full flex flex-col" style={{ background: "#000" }}>
+    <div className="h-full flex flex-col relative" style={{ background: "#000" }}>
+      {flash && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: flash === "good" ? "rgba(15,122,82,0.35)" : "rgba(188,51,39,0.35)", zIndex: 50, transition: "opacity 0.5s ease-out" }}
+        />
+      )}
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ background: T.panel, borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
