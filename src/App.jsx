@@ -509,7 +509,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
 
   const handleShowDtbQr = () => {
     if (!dtbQrUrl) {
-      QRCode.toDataURL("atlas:redeem:dtb", { width: 260, margin: 1, color: { dark: T.ash, light: "#FFFFFF" } }).then(setDtbQrUrl);
+      QRCode.toDataURL("atlas:redeem:dtb", { width: 280, margin: 4, color: { dark: T.ash, light: "#FFFFFF" } }).then(setDtbQrUrl);
     }
     setShowDtbQr(true);
   };
@@ -1554,7 +1554,22 @@ function CheckInScreen({ event, onBack }) {
       scanner
         .start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
+          {
+            fps: 10,
+            // A function, not a fixed size — this is the library's own
+            // recommended pattern specifically because a fixed pixel box
+            // can get unevenly constrained on devices with a different
+            // camera aspect ratio than expected (this is exactly what was
+            // happening on tablets — a real, different-shaped viewfinder
+            // than a phone's, not something a bigger fixed number fixes).
+            // Computing it from the real viewfinder size at runtime
+            // guarantees a true square everywhere, every device shape.
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+              const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+              const size = Math.floor(minEdge * 0.7);
+              return { width: size, height: size };
+            },
+          },
           async (decodedText) => {
             if (busyRef.current) return;
             busyRef.current = true;
