@@ -33,21 +33,11 @@ export function useEventBookings(eventId) {
   return { bookings, bookingsLoading: loading };
 }
 
-// Parses the exact same "atlas:checkin:{eventId}:{uid}" payload the player
-// app's QR code already generates, verifies it matches the event actually
-// being scanned into, confirms a real booking exists for that uid, and
-// marks it checked in. Returns a result object rather than throwing, so
-// the scanner UI can show a clear message for every outcome without a
-// try/catch around each distinct failure case.
-export async function checkInFromScan(rawText, eventId) {
-  const parts = (rawText || "").split(":");
-  if (parts.length !== 4 || parts[0] !== "atlas" || parts[1] !== "checkin") {
-    return { ok: false, reason: "not-atlas-code" };
-  }
-  const [, , scannedEventId, uid] = parts;
-  if (scannedEventId !== eventId) {
-    return { ok: false, reason: "wrong-event" };
-  }
+// Shared by both the QR scanner and manual search-based check-in, so
+// there's exactly one place that knows how a check-in actually gets
+// written (both mirrored copies — see the comment below) rather than two
+// copies of that logic that could quietly drift apart.
+export async function checkInPlayer(eventId, uid) {
   const bookingRef = doc(db, "events", eventId, "bookings", uid);
   const snap = await getDoc(bookingRef);
   if (!snap.exists()) {
@@ -68,4 +58,22 @@ export async function checkInFromScan(rawText, eventId) {
   batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp() });
   await batch.commit();
   return { ok: true, callsign: data.callsign };
+}
+
+// Parses the exact same "atlas:checkin:{eventId}:{uid}" payload the player
+// app's QR code already generates, verifies it matches the event actually
+// being scanned into, then delegates to the same check-in logic manual
+// check-in uses. Returns a result object rather than throwing, so the
+// scanner UI can show a clear message for every outcome without a
+// try/catch around each distinct failure case.
+export async function checkInFromScan(rawText, eventId) {
+  const parts = (rawText || "").split(":");
+  if (parts.length !== 4 || parts[0] !== "atlas" || parts[1] !== "checkin") {
+    return { ok: false, reason: "not-atlas-code" };
+  }
+  const [, , scannedEventId, uid] = parts;
+  if (scannedEventId !== eventId) {
+    return { ok: false, reason: "wrong-event" };
+  }
+  return checkInPlayer(eventId, uid);
 }

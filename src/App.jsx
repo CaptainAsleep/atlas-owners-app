@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./leg
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, checkInFromScan } from "./hooks/useEventBookings";
+import { useEventBookings, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { db, storage } from "./lib/firebase";
 import { collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -1640,6 +1640,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const bannedUids = new Set(banned.map((b) => b.uid));
+  const [showManualCheckIn, setShowManualCheckIn] = useState(false);
 
   const renderPersonRow = (uid, name, dateValue, checkedIn) => {
     const isBanned = bannedUids.has(uid);
@@ -1683,8 +1684,15 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
       <div className="px-6 pt-4">
         <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{event.title}</div>
 
-        <div className="mb-4">
-          <PrimaryButton onClick={onOpenCheckIn}>Scan to Check In</PrimaryButton>
+        <div className="mb-4 flex gap-2">
+          <div className="flex-1"><PrimaryButton onClick={onOpenCheckIn}>Scan to Check In</PrimaryButton></div>
+          <button
+            onClick={() => setShowManualCheckIn(true)}
+            className="px-4 py-3 text-[13px] font-semibold flex items-center gap-2"
+            style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4 }}
+          >
+            <Search size={15} /> Manual
+          </button>
         </div>
 
         {typeof event.maxCapacity === "number" ? (
@@ -1786,6 +1794,116 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             ))}
           </>
         )}
+      </div>
+
+      {showManualCheckIn && (
+        <ManualCheckInModal
+          event={event}
+          bookings={bookings}
+          signatures={signatures}
+          onClose={() => setShowManualCheckIn(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// The fallback for when QR scanning isn't an option — a dead phone, no
+// signal to load the code, forgot it entirely. Deliberately searches only
+// within this event's own real bookings, not all of Atlas — checking
+// someone in only ever makes sense for someone who already has a real
+// booking here, the same constraint the scanner itself enforces.
+function ManualCheckInModal({ event, bookings, signatures, onClose }) {
+  const [query, setQuery] = useState("");
+  const [busyUid, setBusyUid] = useState(null);
+  const [feedback, setFeedback] = useState(null); // { uid, ok, message }
+
+  const signedUids = new Set(signatures.map((s) => s.uid).filter(Boolean));
+  const matches = bookings.filter((b) => b.callsign.toLowerCase().includes(query.trim().toLowerCase()));
+
+  const handleCheckIn = async (booking) => {
+    setBusyUid(booking.uid);
+    setFeedback(null);
+    try {
+      const result = await checkInPlayer(event.id, booking.uid);
+      if (result.ok) {
+        playFeedbackSound(true);
+        setFeedback({ uid: booking.uid, ok: true, message: `${result.callsign} checked in` });
+      } else {
+        playFeedbackSound(false);
+        setFeedback({ uid: booking.uid, ok: false, message: result.reason === "already-checked-in" ? "Already checked in" : "Couldn't check in — try again" });
+      }
+    } catch (err) {
+      console.error("manual check-in failed:", err);
+      playFeedbackSound(false);
+      setFeedback({ uid: booking.uid, ok: false, message: "Couldn't check in — try again" });
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 flex items-end" style={{ background: "rgba(0,0,0,0.5)", zIndex: 1600 }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-h-[85vh] flex flex-col" style={{ background: T.void, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${T.line}` }}>
+          <div>
+            <h2 className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>Manual Check-In</h2>
+            <p className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{event.title}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center">
+            <X size={18} color={T.ashDim} />
+          </button>
+        </div>
+
+        <div className="px-5 pt-3">
+          <div className="relative mb-3">
+            <Search size={15} color={T.ashFaint} className="absolute left-3 top-1/2" style={{ transform: "translateY(-50%)" }} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search booked players by name"
+              autoFocus
+              className="w-full pl-9 pr-3 py-2.5 text-[13px] bg-transparent outline-none"
+              style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash, boxSizing: "border-box" }}
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-5">
+          {bookings.length === 0 ? (
+            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
+          ) : matches.length === 0 ? (
+            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No booked player matches that name.</p>
+          ) : (
+            matches.map((b) => (
+              <div key={b.uid} className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{b.callsign}</div>
+                  {b.checkedIn ? (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
+                      <Check size={9} /> CHECKED IN
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleCheckIn(b)}
+                      disabled={busyUid === b.uid}
+                      className="px-3 py-1.5 text-[11px] font-semibold"
+                      style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: busyUid === b.uid ? 0.6 : 1 }}
+                    >
+                      {busyUid === b.uid ? "…" : "Check In"}
+                    </button>
+                  )}
+                </div>
+                <div className="text-[11px]" style={{ ...body, color: signedUids.has(b.uid) ? T.good : T.alert }}>
+                  {signedUids.has(b.uid) ? "✓ Waiver signed" : "⚠ No waiver signature found"}
+                </div>
+                {feedback?.uid === b.uid && (
+                  <div className="text-[11px] font-medium mt-1" style={{ ...body, color: feedback.ok ? T.good : T.alert }}>{feedback.message}</div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
