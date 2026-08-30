@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check,
+  Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
   Settings, Users, LayoutDashboard, Pencil, QrCode, X,
 } from "lucide-react";
@@ -12,7 +12,7 @@ import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, checkInFromScan } from "./hooks/useEventBookings";
 import { db, storage } from "./lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 /* ---------- design tokens — same palette as the player app for immediate
@@ -64,6 +64,28 @@ function parsePrice(str) {
 // Defensive display formatting — if a price was ever stored as a bare
 // number (no $ prefix), show it with one rather than a confusing bare
 // digit. Doesn't touch the stored value, just how it renders.
+// Purely client-side — no backend needed for something this simple. Builds
+// a real CSV string from data already loaded on screen (no extra Firestore
+// reads) and triggers a normal browser download via a temporary link.
+// Quotes any field containing a comma, quote, or newline, doubling internal
+// quotes — the one real escaping rule CSV actually needs to stay valid.
+function downloadCsv(filename, headers, rows) {
+  const escape = (val) => {
+    const s = val == null ? "" : String(val);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.map(escape).join(","), ...rows.map((row) => row.map(escape).join(","))];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function displayPrice(price) {
   if (!price) return price;
   const trimmed = String(price).trim();
@@ -965,7 +987,9 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
 
       <div className="px-6 pt-4">
         <div className="flex items-center gap-2 mb-1">
-          {ev.draft ? (
+          {ev.canceled ? (
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: 2 }}>CANCELED</span>
+          ) : ev.draft ? (
             <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
           ) : (
             <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
@@ -1627,7 +1651,27 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>No capacity limit set for this event.</p>
         )}
 
-        <Eyebrow>Booked Players ({bookings.length})</Eyebrow>
+        <div className="flex items-center justify-between mb-1">
+          <Eyebrow>Booked Players ({bookings.length})</Eyebrow>
+          {bookings.length > 0 && (
+            <button
+              onClick={() => downloadCsv(
+                `${event.title} - Booked Players.csv`,
+                ["Callsign", "Booked At", "Checked In", "Checked In At"],
+                bookings.map((b) => [
+                  b.callsign,
+                  b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
+                  b.checkedIn ? "Yes" : "No",
+                  b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
+                ])
+              )}
+              className="text-[11px] font-semibold"
+              style={{ ...body, color: T.accent }}
+            >
+              Export CSV
+            </button>
+          )}
+        </div>
         {bookingsLoading ? (
           <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
         ) : bookings.length === 0 ? (
@@ -1638,7 +1682,26 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           </div>
         )}
 
-        <Eyebrow>Waiver Signatures ({signatures.length})</Eyebrow>
+        <div className="flex items-center justify-between mb-1">
+          <Eyebrow>Waiver Signatures ({signatures.length})</Eyebrow>
+          {signatures.length > 0 && (
+            <button
+              onClick={() => downloadCsv(
+                `${event.title} - Waiver Signatures.csv`,
+                ["Signed Name", "Signed At", "Waiver Version"],
+                signatures.map((s) => [
+                  s.signedName,
+                  s.signedAt?.toDate ? s.signedAt.toDate().toLocaleString() : "",
+                  s.waiverVersion || "",
+                ])
+              )}
+              className="text-[11px] font-semibold"
+              style={{ ...body, color: T.accent }}
+            >
+              Export CSV
+            </button>
+          )}
+        </div>
         <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
           Everyone who's signed the waiver, including anyone who signed without booking. Every booking above already
           required a signature, so this list will always be a superset of Booked Players.
@@ -1708,20 +1771,25 @@ function OwnerBottomNav({ active, onNavigate }) {
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
 function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, duplicateEvent, updateEvent }) {
   const [tab, setTab] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmPublish, setConfirmPublish] = useState(null);
+  const [confirmCancel, setConfirmCancel] = useState(null);
   const [busy, setBusy] = useState(false);
   const today = localDateStr();
 
-  const filtered = events.filter((ev) => {
-    if (tab === "drafts") return ev.draft === true;
-    if (tab === "all") return true; // genuinely all — drafts included
-    if (ev.draft) return false; // Upcoming/Past are date-based buckets; a draft has no confirmed date to bucket by
-    if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
-    if (tab === "past") return (ev.endDate || ev.date) < today;
-    return true;
-  });
+  const filtered = events
+    .filter((ev) => {
+      if (tab === "canceled") return ev.canceled === true;
+      if (tab === "drafts") return ev.draft === true;
+      if (tab === "all") return true; // genuinely all — drafts and canceled included
+      if (ev.draft || ev.canceled) return false; // Upcoming/Past are date-based buckets; neither has a real confirmed slot anymore
+      if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
+      if (tab === "past") return (ev.endDate || ev.date) < today;
+      return true;
+    })
+    .filter((ev) => !searchQuery.trim() || ev.title.toLowerCase().includes(searchQuery.trim().toLowerCase()));
 
   const handleDuplicate = async (ev) => {
     const newId = await duplicateEvent(ev);
@@ -1738,6 +1806,20 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
     try {
       await deleteEvent(confirmDelete.id);
       setConfirmDelete(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Distinct from delete — keeps the event as a real record (bookings,
+  // waiver signatures, and history all stay intact), just marks it as no
+  // longer actually happening. Players who booked or favorited it see a
+  // real "canceled" state instead of the event just quietly vanishing.
+  const handleConfirmCancel = async () => {
+    setBusy(true);
+    try {
+      await updateEvent(confirmCancel.id, { canceled: true, canceledAt: serverTimestamp() });
+      setConfirmCancel(null);
     } finally {
       setBusy(false);
     }
@@ -1788,12 +1870,23 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           </>
         )}
 
-        <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${T.line}` }}>
-          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"]].map(([key, label]) => (
+        <div className="relative mb-3">
+          <Search size={15} color={T.ashFaint} className="absolute left-3 top-1/2" style={{ transform: "translateY(-50%)" }} />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search your events by name"
+            className="w-full pl-9 pr-3 py-2.5 text-[13px] bg-transparent outline-none"
+            style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash, boxSizing: "border-box" }}
+          />
+        </div>
+
+        <div className="flex gap-1 mb-4 overflow-x-auto" style={{ borderBottom: `1px solid ${T.line}` }}>
+          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"], ["canceled", "Canceled"]].map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
-              className="px-3 py-2 text-[12px] font-semibold"
+              className="px-3 py-2 text-[12px] font-semibold flex-shrink-0"
               style={{ ...body, color: tab === key ? T.ash : T.ashFaint, borderBottom: tab === key ? `2px solid ${T.ash}` : "2px solid transparent" }}
             >
               {label}
@@ -1811,7 +1904,9 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <button onClick={() => onOpenOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="w-full text-left">
                 <div className="flex items-start justify-between mb-1">
                   <div className="flex items-center gap-2">
-                    {ev.draft ? (
+                    {ev.canceled ? (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: 2 }}>CANCELED</span>
+                    ) : ev.draft ? (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
                     ) : (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
@@ -1847,6 +1942,16 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                     Publish
                   </button>
                 )}
+                {ev.canceled && (
+                  <button onClick={() => updateEvent(ev.id, { canceled: false, canceledAt: null })} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                    Reactivate
+                  </button>
+                )}
+                {!ev.draft && !ev.canceled && (
+                  <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                    <Ban size={14} />
+                  </button>
+                )}
                 <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
                   <Trash2 size={14} />
                 </button>
@@ -1855,6 +1960,25 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           ))
         )}
       </div>
+
+      {confirmCancel && (
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmCancel(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Cancel this event?</div>
+            <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+              "{confirmCancel.title}" will be marked canceled — anyone who booked or favorited it will see that. This keeps the real record, unlike delete, and can be reversed by editing the event again.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                Never mind
+              </button>
+              <button onClick={handleConfirmCancel} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Canceling…" : "Cancel Event"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmDelete(null)}>
