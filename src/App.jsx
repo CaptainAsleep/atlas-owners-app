@@ -1367,8 +1367,10 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
         <Eyebrow>Check-In Reward Patch</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
-          Attach a patch here and it's granted automatically the moment a player is scanned in. Name it like an
-          achievement: "[patch name]: [what earns it]" — e.g. "DTB: Attend 3 events at The Compound."
+          Attach a patch here and it's granted automatically the moment a player is scanned in. This is for
+          attending THIS specific event — not a multi-event achievement like "attend 3 events at a field," which
+          lives in the separate achievement system instead. Name it like an achievement: "[patch name]: [what earns
+          it]" — e.g. "Across the Atlas: Awarded for attending the Across the Atlas {new Date().getFullYear()} event at Atlas Airsoft Arena."
         </p>
         <input ref={patchInputRef} type="file" accept="image/*" onChange={handlePatchSelected} className="hidden" />
         <div className="flex items-center gap-3 mb-4">
@@ -1387,7 +1389,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           <input
             value={patchName}
             onChange={(e) => setPatchName(e.target.value)}
-            placeholder="e.g. DTB: Attend 3 events at The Compound"
+            placeholder={`e.g. Across the Atlas: Awarded for attending the Across the Atlas ${new Date().getFullYear()} event at Atlas Airsoft Arena`}
             className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
             style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
           />
