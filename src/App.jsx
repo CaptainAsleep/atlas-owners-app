@@ -1641,6 +1641,8 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const bannedUids = new Set(banned.map((b) => b.uid));
   const [showManualCheckIn, setShowManualCheckIn] = useState(false);
+  const [rosterFilter, setRosterFilter] = useState("all"); // all | checkedIn | notYet
+  const [rosterSearch, setRosterSearch] = useState("");
 
   const renderPersonRow = (uid, name, dateValue, checkedIn) => {
     const isBanned = bannedUids.has(uid);
@@ -1696,7 +1698,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         </div>
 
         {typeof event.maxCapacity === "number" ? (
-          <div className="mb-4 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="flex items-baseline justify-between mb-1.5">
               <span className="text-[20px] font-semibold" style={{ ...display, color: T.good }}>{event.bookedCount || 0}</span>
               <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} booked</span>
@@ -1706,7 +1708,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             </div>
           </div>
         ) : (
-          <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>No capacity limit set for this event.</p>
+          <p className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>No capacity limit set for this event.</p>
+        )}
+        {!bookingsLoading && bookings.length > 0 && (
+          <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>
+            <span style={{ fontWeight: 600, color: T.good }}>{bookings.filter((b) => b.checkedIn).length}</span> of {bookings.length} checked in so far
+          </p>
         )}
 
         <div className="flex items-center justify-between mb-1">
@@ -1735,9 +1742,59 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         ) : bookings.length === 0 ? (
           <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
         ) : (
-          <div className="mb-5">
-            {bookings.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt, b.checkedIn))}
-          </div>
+          <>
+            {(() => {
+              const checkedInCount = bookings.filter((b) => b.checkedIn).length;
+              const notYetCount = bookings.length - checkedInCount;
+              const FILTERS = [
+                { key: "all", label: `All (${bookings.length})` },
+                { key: "checkedIn", label: `Checked In (${checkedInCount})` },
+                { key: "notYet", label: `Not Yet (${notYetCount})` },
+              ];
+              const filtered = bookings
+                .filter((b) => rosterFilter === "all" || (rosterFilter === "checkedIn" ? b.checkedIn : !b.checkedIn))
+                .filter((b) => !rosterSearch.trim() || b.callsign.toLowerCase().includes(rosterSearch.trim().toLowerCase()));
+
+              return (
+                <>
+                  <div className="relative mb-2">
+                    <Search size={14} color={T.ashFaint} className="absolute left-3 top-1/2" style={{ transform: "translateY(-50%)" }} />
+                    <input
+                      value={rosterSearch}
+                      onChange={(e) => setRosterSearch(e.target.value)}
+                      placeholder="Search booked players"
+                      className="w-full pl-8 pr-3 py-2 text-[12px] bg-transparent outline-none"
+                      style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, boxSizing: "border-box" }}
+                    />
+                  </div>
+                  <div className="flex gap-1 mb-3 overflow-x-auto">
+                    {FILTERS.map((f) => (
+                      <button
+                        key={f.key}
+                        onClick={() => setRosterFilter(f.key)}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold flex-shrink-0"
+                        style={{
+                          ...body,
+                          color: rosterFilter === f.key ? "#FFFFFF" : T.ashDim,
+                          background: rosterFilter === f.key ? T.ash : T.panelAlt,
+                          borderRadius: 999,
+                        }}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  {filtered.length === 0 ? (
+                    <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one matches.</p>
+                  ) : (
+                    <div className="mb-5">
+                      {filtered.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt, b.checkedIn))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </>
         )}
 
         <div className="flex items-center justify-between mb-1">
