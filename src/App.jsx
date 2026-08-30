@@ -260,6 +260,14 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+  // Highest-level rollup — every upcoming, non-canceled, published event
+  // across every field this owner manages, not just one field or event.
+  const totalProjectedRevenue = upcoming.reduce((sum, e) => {
+    if (e.canceled) return sum;
+    const p = parsePrice(e.price);
+    const cap = typeof e.maxCapacity === "number" ? e.maxCapacity : parseInt(e.maxCapacity, 10);
+    return sum + (p && cap ? p * cap : 0);
+  }, 0);
 
   return (
     <div className="h-full overflow-y-auto pb-10" style={flatBg}>
@@ -310,6 +318,17 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                 <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Players who favorited your events — not confirmed bookings</div>
               </div>
             </div>
+
+            {!eventsLoading && totalProjectedRevenue > 0 && (
+              <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <TrendingUp size={13} color={T.ashFaint} />
+                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Projected Revenue (Gross, Upcoming)</span>
+                </div>
+                <div className="text-[22px] font-semibold" style={{ ...display, color: T.accent }}>${totalProjectedRevenue.toFixed(2)}</div>
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Summed across every upcoming event at full capacity, across all your fields — not a real payment yet</div>
+              </div>
+            )}
           </>
         )}
 
@@ -506,6 +525,15 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
   const upcoming = fieldEvents.filter((e) => !e.draft && (e.endDate || e.date) >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = fieldEvents.reduce((sum, e) => sum + (e.interestCount || 0), 0);
   const totalBooked = fieldEvents.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
+  // Summed only across real upcoming, non-canceled events — counting a
+  // canceled event's would-have-been revenue here would be genuinely
+  // misleading, not just imprecise.
+  const totalProjectedRevenue = upcoming.reduce((sum, e) => {
+    if (e.canceled) return sum;
+    const p = parsePrice(e.price);
+    const cap = typeof e.maxCapacity === "number" ? e.maxCapacity : parseInt(e.maxCapacity, 10);
+    return sum + (p && cap ? p * cap : 0);
+  }, 0);
 
   const handleShowDtbQr = () => {
     if (!dtbQrUrl) {
@@ -555,6 +583,14 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
           </div>
         </div>
+
+        {!eventsLoading && totalProjectedRevenue > 0 && (
+          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+              Projected Revenue (Gross, Upcoming): <span style={{ fontWeight: 600, color: T.accent }}>${totalProjectedRevenue.toFixed(2)}</span> — summed across this field's upcoming events at full capacity, not a real payment yet
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-2">
           <Eyebrow>Upcoming Events</Eyebrow>
@@ -1014,6 +1050,19 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Price</div>
           </div>
         </div>
+
+        {(() => {
+          const p = parsePrice(ev.price);
+          const cap = typeof ev.maxCapacity === "number" ? ev.maxCapacity : parseInt(ev.maxCapacity, 10);
+          if (!p || !cap) return null;
+          return (
+            <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+                Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${(p * cap).toFixed(2)}</span> — entry cost × capacity, not a real payment yet
+              </div>
+            </div>
+          );
+        })()}
 
         <button onClick={() => onOpenRoster(ev)} className="w-full mb-5 py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
           <Users size={15} color={T.ashDim} />
