@@ -5,8 +5,12 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   updateProfile,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword,
+  deleteUser,
 } from "firebase/auth";
-import { doc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 
 export function useOwnerAuth() {
@@ -84,5 +88,35 @@ export function useOwnerAuth() {
     );
   }
 
-  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms };
+  async function changePassword(currentPassword, newPassword) {
+    if (!auth.currentUser?.email) return;
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+    await updatePassword(auth.currentUser, newPassword);
+  }
+
+  // Requires re-authentication for the same reason it does in the player
+  // app — irreversible, so Firebase correctly won't allow it on a stale
+  // session. Also releases any fields this owner had claimed back to
+  // unclaimed, rather than leaving them permanently stuck pointing at an
+  // owner account that no longer exists — nobody else could ever claim or
+  // manage that field again otherwise.
+  async function deleteAccount(currentPassword) {
+    if (!auth.currentUser?.email) return;
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+
+    const uid = auth.currentUser.uid;
+    const ownedFieldsSnap = await getDocs(query(collection(db, "fields"), where("ownerId", "==", uid)));
+    await Promise.all(
+      ownedFieldsSnap.docs.map((d) =>
+        updateDoc(d.ref, { ownerId: null, claimed: false, ownerEmailDomain: null, claimPending: false, claimRequestedBy: null })
+      )
+    );
+
+    await deleteDoc(doc(db, "owners", uid));
+    await deleteUser(auth.currentUser);
+  }
+
+  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount };
 }

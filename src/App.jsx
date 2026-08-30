@@ -1986,11 +1986,27 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 }
 
 /* ---------- Settings ---------- */
-function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onLogout }) {
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+
+  const [showLegal, setShowLegal] = useState(false);
+  const [legalTab, setLegalTab] = useState("terms");
+
+  const [showDelete, setShowDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   // profile arrives asynchronously — if it wasn't loaded yet at the exact
   // moment this screen first mounted, the useState initializer above would
@@ -2016,6 +2032,52 @@ function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
     }
   };
 
+  const friendlyAuthError = (code) => {
+    if (code === "auth/invalid-credential" || code === "auth/wrong-password") return "Current password is incorrect.";
+    if (code === "auth/weak-password") return "New password needs to be at least 6 characters.";
+    if (code === "auth/too-many-requests") return "Too many attempts — wait a bit and try again.";
+    return "Something went wrong — try again.";
+  };
+
+  const submitPasswordChange = async (e) => {
+    e.preventDefault();
+    setPasswordError("");
+    setPasswordSuccess(false);
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New passwords don't match.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setPasswordSuccess(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setPasswordError(friendlyAuthError(err.code));
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const submitDelete = async () => {
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      await deleteAccount(deletePassword);
+    } catch (err) {
+      setDeleteError(friendlyAuthError(err.code));
+      setDeleting(false);
+    }
+  };
+
+  const LEGAL_TABS = [
+    { key: "terms", label: "Terms of Use", text: TERMS_OF_USE },
+    { key: "privacy", label: "Privacy Policy", text: PRIVACY_POLICY },
+    { key: "eula", label: "EULA", text: EULA },
+  ];
+
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4">
@@ -2033,6 +2095,69 @@ function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
 
+        <Eyebrow>Security</Eyebrow>
+        <button
+          onClick={() => { setShowPasswordForm(!showPasswordForm); setPasswordError(""); setPasswordSuccess(false); }}
+          className="w-full flex items-center justify-between py-3 px-4 mb-2"
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+        >
+          <span className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>Change Password</span>
+          <ChevronRight size={15} color={T.ashFaint} style={{ transform: showPasswordForm ? "rotate(90deg)" : "none" }} />
+        </button>
+        {showPasswordForm && (
+          <form onSubmit={submitPasswordChange} className="flex flex-col gap-2.5 mb-2">
+            <input
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              type="password"
+              autoComplete="current-password"
+              placeholder="Current password"
+              className="px-4 py-3 text-[14px] bg-transparent outline-none"
+              style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+            />
+            <input
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              type="password"
+              autoComplete="new-password"
+              placeholder="New password"
+              className="px-4 py-3 text-[14px] bg-transparent outline-none"
+              style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+            />
+            <input
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              type="password"
+              autoComplete="new-password"
+              placeholder="Confirm new password"
+              className="px-4 py-3 text-[14px] bg-transparent outline-none"
+              style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+            />
+            {passwordError && <p className="text-[12px]" style={{ ...body, color: T.alert }}>{passwordError}</p>}
+            {passwordSuccess && <p className="text-[12px]" style={{ ...body, color: T.good }}>Password updated.</p>}
+            <button
+              type="submit"
+              disabled={passwordSaving || !currentPassword || !newPassword}
+              className="w-full py-3 font-semibold text-[14px]"
+              style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: passwordSaving || !currentPassword || !newPassword ? 0.6 : 1 }}
+            >
+              {passwordSaving ? "Updating…" : "Update Password"}
+            </button>
+          </form>
+        )}
+
+        <div className="mb-6" />
+
+        <Eyebrow>Legal</Eyebrow>
+        <button
+          onClick={() => setShowLegal(true)}
+          className="w-full mb-6 p-4 flex items-center justify-between"
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+        >
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Terms, Privacy & EULA</span>
+          <ChevronRight size={16} color={T.ashFaint} />
+        </button>
+
         <Eyebrow>Support</Eyebrow>
         <a
           href="https://discord.gg/hR8EntGsq"
@@ -2045,7 +2170,7 @@ function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
           <ChevronRight size={16} color={T.ashFaint} />
         </a>
 
-        <div className="mt-4 mb-6">
+        <div className="mb-4">
           <button
             onClick={onLogout}
             className="w-full py-3 font-medium text-[14px] flex items-center justify-center gap-2"
@@ -2054,7 +2179,73 @@ function SettingsScreen({ profile, user, updateOwnerName, onLogout }) {
             <LogOut size={15} /> Log Out
           </button>
         </div>
+
+        {!showDelete ? (
+          <button onClick={() => setShowDelete(true)} className="w-full text-center text-[13px] font-medium py-2 mb-4" style={{ ...body, color: T.alert }}>
+            Delete Account
+          </button>
+        ) : (
+          <div className="p-4 mb-4" style={{ background: "rgba(188,51,39,0.08)", border: `1px solid ${T.alert}`, borderRadius: 6 }}>
+            <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Delete your account?</div>
+            <p className="text-[12px] mb-3" style={{ ...body, color: T.ashDim }}>
+              This permanently deletes your owner account. Any fields you've claimed are released back to unclaimed — you or someone else would need to reclaim them. This can't be undone. Enter your password to confirm.
+            </p>
+            <input
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              type="password"
+              autoComplete="current-password"
+              placeholder="Current password"
+              className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none mb-3"
+              style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
+            />
+            {deleteError && <p className="text-[11px] mb-2" style={{ ...body, color: T.alert }}>{deleteError}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => { setShowDelete(false); setDeletePassword(""); setDeleteError(""); }} className="flex-1 py-2.5 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                Cancel
+              </button>
+              <button
+                onClick={submitDelete}
+                disabled={deleting || !deletePassword}
+                className="flex-1 py-2.5 text-[12px] font-semibold"
+                style={{ ...display, background: T.alert, color: "#FFFFFF", borderRadius: 4, opacity: deleting || !deletePassword ? 0.6 : 1 }}
+              >
+                {deleting ? "Deleting…" : "Delete Permanently"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>Atlas Field Owner</p>
       </div>
+
+      {showLegal && (
+        <div onClick={() => setShowLegal(false)} className="fixed inset-0 flex items-end" style={{ background: "rgba(0,0,0,0.5)", zIndex: 1500 }}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-h-[85vh] flex flex-col" style={{ background: T.void, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
+            <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <h2 className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>Legal</h2>
+              <button onClick={() => setShowLegal(false)} className="w-8 h-8 flex items-center justify-center">
+                <X size={18} color={T.ashDim} />
+              </button>
+            </div>
+            <div className="px-5 flex gap-1" style={{ borderBottom: `1px solid ${T.line}` }}>
+              {LEGAL_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setLegalTab(t.key)}
+                  className="px-2 py-2 text-[12px] font-semibold"
+                  style={{ ...body, color: legalTab === t.key ? T.ash : T.ashFaint, borderBottom: legalTab === t.key ? `2px solid ${T.ash}` : "2px solid transparent" }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+              <p className="text-[12px] whitespace-pre-wrap" style={{ ...body, color: T.ashDim, lineHeight: 1.6 }}>{LEGAL_TABS.find((t) => t.key === legalTab).text}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2146,7 +2337,7 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount } = useOwnerAuth();
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
@@ -2302,6 +2493,8 @@ export default function App() {
           profile={profile}
           user={user}
           updateOwnerName={updateOwnerName}
+          changePassword={changePassword}
+          deleteAccount={deleteAccount}
           onLogout={handleLogout}
         />
       );
