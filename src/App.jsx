@@ -1646,6 +1646,18 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
 
   const renderPersonRow = (uid, name, dateValue, checkedIn) => {
     const isBanned = bannedUids.has(uid);
+    // Cross-references by uid so the field owner sees a real, unambiguous
+    // name to call out — callsigns alone aren't unique (multiple players
+    // really could both be "Ghost"), and the real legal name already
+    // exists here for anyone who signed a waiver, just not previously
+    // connected to the callsign visually. Shows whichever of the two
+    // wasn't already passed in as the primary name, so this works the
+    // same way in both the Booked Players section (callsign primary) and
+    // the Waiver Signatures section (real name primary) without needing
+    // two different versions of this function.
+    const matchingSignature = signatures.find((s) => s.uid === uid);
+    const matchingBooking = bookings.find((b) => b.uid === uid);
+    const secondaryName = [matchingSignature?.signedName, matchingBooking?.callsign].find((n) => n && n !== name);
     return (
       <div key={uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
         <div>
@@ -1657,6 +1669,9 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               </span>
             )}
           </div>
+          {secondaryName && (
+            <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{secondaryName}</div>
+          )}
           {dateValue?.toDate && (
             <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>{dateValue.toDate().toLocaleDateString()}</div>
           )}
@@ -1753,7 +1768,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               ];
               const filtered = bookings
                 .filter((b) => rosterFilter === "all" || (rosterFilter === "checkedIn" ? b.checkedIn : !b.checkedIn))
-                .filter((b) => !rosterSearch.trim() || b.callsign.toLowerCase().includes(rosterSearch.trim().toLowerCase()));
+                .filter((b) => {
+                  const q = rosterSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const realName = signatures.find((s) => s.uid === b.uid)?.signedName || "";
+                  return b.callsign.toLowerCase().includes(q) || realName.toLowerCase().includes(q);
+                });
 
               return (
                 <>
@@ -1788,7 +1808,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                     <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one matches.</p>
                   ) : (
                     <div className="mb-5">
-                      {filtered.map((b) => renderPersonRow(b.uid, b.callsign, b.bookedAt, b.checkedIn))}
+                      {filtered.map((b) => renderPersonRow(b.uid, signatures.find((s) => s.uid === b.uid)?.signedName || b.callsign, b.bookedAt, b.checkedIn))}
                     </div>
                   )}
                 </>
@@ -1876,7 +1896,15 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
   const [feedback, setFeedback] = useState(null); // { uid, ok, message }
 
   const signedUids = new Set(signatures.map((s) => s.uid).filter(Boolean));
-  const matches = bookings.filter((b) => b.callsign.toLowerCase().includes(query.trim().toLowerCase()));
+  const nameByUid = new Map(signatures.filter((s) => s.uid).map((s) => [s.uid, s.signedName]));
+  // Searches both callsign and real signed name — a field owner might be
+  // handed a real name to look up just as often as a callsign, especially
+  // since callsigns alone can't be trusted to be unique.
+  const matches = bookings.filter((b) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return b.callsign.toLowerCase().includes(q) || (nameByUid.get(b.uid) || "").toLowerCase().includes(q);
+  });
 
   const handleCheckIn = async (booking) => {
     setBusyUid(booking.uid);
@@ -1935,7 +1963,12 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
             matches.map((b) => (
               <div key={b.uid} className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
                 <div className="flex items-center justify-between mb-1">
-                  <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{b.callsign}</div>
+                  <div>
+                    <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{nameByUid.get(b.uid) || b.callsign}</div>
+                    {nameByUid.get(b.uid) && (
+                      <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{b.callsign}</div>
+                    )}
+                  </div>
                   {b.checkedIn ? (
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
                       <Check size={9} /> CHECKED IN
