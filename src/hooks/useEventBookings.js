@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Real bookings for one event — a genuine commitment to attend, not just
@@ -57,6 +57,15 @@ export async function checkInFromScan(rawText, eventId) {
   if (data.checkedIn) {
     return { ok: false, reason: "already-checked-in", callsign: data.callsign };
   }
-  await updateDoc(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp() });
+  // Both mirrored copies, not just the event's — a booking exists as two
+  // documents (one under the event for the owner's roster, one under the
+  // player for their own Schedule tab), and only the second one is what
+  // the achievement engine and the player's own UI actually read. Missing
+  // this was a real bug: check-in-based patches could never fire, since
+  // the copy they check never learned a check-in happened at all.
+  const batch = writeBatch(db);
+  batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp() });
+  batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp() });
+  await batch.commit();
   return { ok: true, callsign: data.callsign };
 }
