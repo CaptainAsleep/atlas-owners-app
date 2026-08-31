@@ -36,6 +36,10 @@ const FONTS = `
 .app-shell-height {
   height: 100vh;
   height: 100dvh;
+  /* The real, actively-measured fallback — takes over the instant the
+     effect above runs, which is fast enough that the vh/dvh values above
+     are really just there to cover the brief instant before that. */
+  height: var(--real-app-height, 100dvh);
 }
 `;
 const display = { fontFamily: "'Space Grotesk', sans-serif" };
@@ -3024,6 +3028,31 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 
 /* ---------- App shell ---------- */
 export default function App() {
+  // The CSS 100dvh fix from before turned out not to be enough on its own
+  // — dvh is the right idea, but on iOS specifically there's a known
+  // timing quirk where the browser's dynamic-viewport calculation doesn't
+  // always settle correctly the instant a page loads right after a
+  // redirect (like returning from Stripe), since the browser's own chrome
+  // hasn't fully finished settling into its final state yet at that exact
+  // moment. A pure CSS unit can't account for that; only actively
+  // measuring and re-measuring the real, current viewport can. This sets
+  // a real pixel value as a CSS variable, on mount and on every resize
+  // (visualViewport specifically, since it tracks the actual visible
+  // area more reliably than the window's own resize event on mobile).
+  useEffect(() => {
+    const setRealHeight = () => {
+      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      document.documentElement.style.setProperty("--real-app-height", `${vh}px`);
+    };
+    setRealHeight();
+    window.visualViewport?.addEventListener("resize", setRealHeight);
+    window.addEventListener("resize", setRealHeight);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", setRealHeight);
+      window.removeEventListener("resize", setRealHeight);
+    };
+  }, []);
+
   // Same gating logic as the player app: only phones and tablets (iPad
   // matches the iOS check, Android tablets match the Android check) get
   // hard-gated — desktop browsers don't have the same "installed app vs.
