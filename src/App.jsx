@@ -3045,9 +3045,20 @@ export default function App() {
       document.documentElement.style.setProperty("--real-app-height", `${vh}px`);
     };
     setRealHeight();
+    // The real bug that was still slipping through: a single measurement
+    // taken immediately on mount can race against the browser's own UI
+    // (address bar, toolbar) still settling into its final state right
+    // after a redirect like returning from Stripe — capturing a height
+    // that's shorter than the true, final screen, and locking that
+    // shorter value in as if it were correct. Re-checking a few times
+    // over the next second catches the real, settled value once the
+    // browser's chrome has actually finished transitioning, rather than
+    // trusting whatever the very first snapshot happened to catch.
+    const settleTimers = [100, 300, 600, 1000].map((delay) => setTimeout(setRealHeight, delay));
     window.visualViewport?.addEventListener("resize", setRealHeight);
     window.addEventListener("resize", setRealHeight);
     return () => {
+      settleTimers.forEach(clearTimeout);
       window.visualViewport?.removeEventListener("resize", setRealHeight);
       window.removeEventListener("resize", setRealHeight);
     };
