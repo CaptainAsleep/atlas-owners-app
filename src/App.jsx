@@ -3146,6 +3146,19 @@ export default function App() {
       document.documentElement.style.setProperty("--real-screen-height", `${real}px`);
     };
     setRealHeight();
+    // A tiny, deliberate scroll nudge — a known technique for exactly
+    // this class of bug. The layout itself has been proven correct for a
+    // couple of rounds now (every measured position and size checks out
+    // exactly right), yet content still isn't actually painting on
+    // screen — which points to the browser's own rendering surface being
+    // stuck at the corrupted, smaller height, not a layout problem CSS
+    // can fix. A real scroll (even 1px) can force Safari to fully
+    // re-evaluate a genuinely stuck internal viewport in a way that CSS
+    // and JS height variables alone don't.
+    setTimeout(() => {
+      window.scrollTo(0, 1);
+      window.scrollTo(0, 0);
+    }, 50);
     window.visualViewport?.addEventListener("resize", setRealHeight);
     window.addEventListener("resize", setRealHeight);
     return () => {
