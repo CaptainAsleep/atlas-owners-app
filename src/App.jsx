@@ -34,17 +34,17 @@ const T = {
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 .app-shell-height {
-  /* Four attempts at calculating "100% of the viewport height" — via
-     vh, dvh, and two different JS measurement strategies — all still hit
-     the same bug after returning from Stripe. Rather than try a fifth way
-     to calculate a height value, this sidesteps the calculation
-     entirely: position: fixed + inset: 0 anchors directly to all four
-     real edges of the viewport at the compositing level, with no height
-     arithmetic involved at all. Nothing to measure means nothing to
-     mismeasure.
+  /* Confirmed real cause: a known WebKit bug (documented on Apple's own
+     developer forums) where visiting an external site with its own
+     "smart app banner" corrupts window.innerHeight/visualViewport.height
+     for the site you return to — even with no banner ever visible there.
+     Every previous attempt correctly trusted those values as ground
+     truth; the browser itself was the one lying. window.screen.height
+     stays genuinely reliable through this bug (confirmed directly: 844
+     in both the broken and working states), so this bypasses the
+     corrupted measurement entirely rather than trying to out-clever it.
   */
-  position: fixed;
-  inset: 0;
+  height: calc(var(--real-screen-height, 100vh) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 `;
 const display = { fontFamily: "'Space Grotesk', sans-serif" };
@@ -3094,6 +3094,19 @@ function DiagnosticHeightBadge() {
 }
 
 export default function App() {
+  // Sets the one measurement confirmed to survive the WebKit bug above —
+  // window.screen.height, not window.innerHeight or visualViewport.height,
+  // both of which get corrupted by it. env(safe-area-inset-*) handles the
+  // status bar directly in CSS, no JS needed for that part.
+  useEffect(() => {
+    const setRealScreenHeight = () => {
+      document.documentElement.style.setProperty("--real-screen-height", `${window.screen.height}px`);
+    };
+    setRealScreenHeight();
+    window.addEventListener("resize", setRealScreenHeight);
+    return () => window.removeEventListener("resize", setRealScreenHeight);
+  }, []);
+
   // Same gating logic as the player app: only phones and tablets (iPad
   // matches the iOS check, Android tablets match the Android check) get
   // hard-gated — desktop browsers don't have the same "installed app vs.
