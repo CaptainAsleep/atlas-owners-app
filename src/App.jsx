@@ -3037,6 +3037,62 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 }
 
 /* ---------- App shell ---------- */
+// Temporary — gives real, on-screen numbers so we can see what's actually
+// happening rather than continuing to guess at CSS theories blind, given
+// how many of those have already failed for this exact bug. Re-measures
+// on an interval specifically so it reflects the real state whenever a
+// screenshot gets taken, not just whatever was true on initial mount.
+// Safe to remove entirely once this is resolved.
+function DiagnosticHeightBadge() {
+  const [stats, setStats] = useState({});
+
+  useEffect(() => {
+    const measure = () => {
+      const shellEl = document.querySelector(".app-shell-height");
+      const rootEl = document.getElementById("root");
+      setStats({
+        innerH: window.innerHeight,
+        vvH: window.visualViewport ? Math.round(window.visualViewport.height) : "n/a",
+        rootH: rootEl ? Math.round(rootEl.getBoundingClientRect().height) : "n/a",
+        shellH: shellEl ? Math.round(shellEl.getBoundingClientRect().height) : "n/a",
+        screenH: window.screen ? window.screen.height : "n/a",
+      });
+    };
+    measure();
+    const interval = setInterval(measure, 500);
+    window.addEventListener("resize", measure);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 4,
+        right: 4,
+        zIndex: 99999,
+        background: "rgba(0,0,0,0.75)",
+        color: "#0f0",
+        fontSize: 9,
+        fontFamily: "monospace",
+        padding: "4px 6px",
+        borderRadius: 4,
+        lineHeight: 1.4,
+        pointerEvents: "none",
+      }}
+    >
+      innerH: {stats.innerH}<br />
+      vvH: {stats.vvH}<br />
+      rootH: {stats.rootH}<br />
+      shellH: {stats.shellH}<br />
+      screenH: {stats.screenH}
+    </div>
+  );
+}
+
 export default function App() {
   // Same gating logic as the player app: only phones and tablets (iPad
   // matches the iOS check, Android tablets match the Android check) get
@@ -3279,6 +3335,7 @@ export default function App() {
       style={{ background: T.void }}
     >
       <style>{FONTS}</style>
+      <DiagnosticHeightBadge />
       <div className="flex-1 min-h-0 relative">
         {content}
         {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
