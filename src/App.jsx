@@ -261,7 +261,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onLogout }) {
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -287,6 +287,20 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
+        {myFields.length > 0 && !profile?.payoutsEnabled && (
+          <button
+            onClick={onOpenPayouts}
+            className="w-full mb-5 p-4 flex items-center gap-3 text-left"
+            style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}
+          >
+            <TrendingUp size={18} color={T.accent} />
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>Set up payouts</div>
+              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>Players can't pay for bookings until this is done — takes a few minutes.</div>
+            </div>
+            <ChevronRight size={16} color={T.accent} />
+          </button>
+        )}
         {!pendingLoading && pendingFields.length > 0 && (
           <>
             <Eyebrow>Pending Review</Eyebrow>
@@ -2467,12 +2481,26 @@ function BillingScreen({ profile, onBack }) {
     }
   };
 
+  // onBack is optional — this same screen doubles as a mandatory gate
+  // (once an owner has claimed a real field, they need a real plan
+  // before going further) as well as an ordinary Settings entry. A gate
+  // has nowhere to go "back" to, so the back button and its explanatory
+  // line only render when there's actually somewhere to return to.
   const header = (
-    <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
-      <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
-        <ChevronLeft size={20} color={T.ash} />
-      </button>
-      <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Billing</h1>
+    <div className="px-6 pt-2 pb-4" style={{ borderBottom: onBack ? `1px solid ${T.line}` : "none" }}>
+      {onBack ? (
+        <div className="flex items-center">
+          <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+            <ChevronLeft size={20} color={T.ash} />
+          </button>
+          <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Billing</h1>
+        </div>
+      ) : (
+        <div className="pt-6">
+          <h1 className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Choose a plan to continue</h1>
+          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>You're all set on your field — just pick a plan to start managing it. Every plan includes a real 30-day free trial.</p>
+        </div>
+      )}
     </div>
   );
 
@@ -3079,6 +3107,18 @@ export default function App() {
     content = <LoadingScreen />;
   } else if (profile.acceptedTermsVersion !== CURRENT_TERMS_VERSION) {
     content = <LegalAgreementScreen onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
+  } else if (
+    myFields.length > 0 &&
+    !profile.comped &&
+    profile.subscriptionStatus !== "active" &&
+    profile.subscriptionStatus !== "trialing"
+  ) {
+    // A real gate, not just a Settings entry — once an owner has actually
+    // claimed a field (not before; claiming itself always stays open),
+    // they can't go any further without a real plan. Reuses the exact
+    // same BillingScreen used from Settings — no onBack here is what
+    // turns it from an optional page into a hard block.
+    content = <BillingScreen profile={profile} />;
   } else if (overlay === "claim") {
     content = (
       <ClaimFieldScreen
@@ -3206,6 +3246,7 @@ export default function App() {
           activityLoading={activityLoading}
           onOpenField={openField}
           onOpenClaim={openClaim}
+          onOpenPayouts={() => setOverlay("payouts")}
           onOpenEventsList={() => setActiveTab("events")}
           onCreateEvent={() => {
             if (myFields.length > 0) openEventEdit(myFields[0], null);
