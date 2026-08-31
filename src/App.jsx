@@ -283,7 +283,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
   }, 0);
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
         <div>
           <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>Welcome back,</div>
@@ -474,7 +474,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -570,7 +570,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -834,7 +834,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -1037,7 +1037,7 @@ const GAME_TYPES = [
 // via the pencil icon.
 function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -1781,7 +1781,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
           <ChevronLeft size={20} color={T.ash} />
@@ -2100,7 +2100,7 @@ function OwnerBottomNav({ active, onNavigate }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
   return (
-    <div className="absolute bottom-0 left-0 right-0 border-t owner-bottom-nav-debug" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
+    <div className="absolute bottom-0 left-0 right-0 border-t" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
       <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 20 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
@@ -2481,7 +2481,14 @@ function BillingScreen({ profile, onBack }) {
     try {
       const createCheckout = httpsCallable(functions, "createSubscriptionCheckout");
       const result = await createCheckout({ tier });
-      window.location.href = result.data.url;
+      // Opens in a genuinely separate tab rather than navigating this
+      // app's own window away — the same real, confirmed WebKit bug that
+      // broke the Payouts flow (corrupting this PWA's own rendering after
+      // returning from an external site through the same tab) applies
+      // here too, same redirect pattern. Opening separately means this
+      // tab never actually leaves, so it never has the chance to hit it.
+      window.open(result.data.url, "_blank");
+      setLoadingTier(null);
     } catch (err) {
       console.error("createSubscriptionCheckout failed:", err);
       setError("Couldn't start checkout — try again, or reach out on Discord if it keeps happening.");
@@ -2573,10 +2580,13 @@ function BillingScreen({ profile, onBack }) {
   // No subscription yet, or a previously canceled one — show the real
   // tier picker.
   return (
-    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       {header}
       <div className="px-6 pt-6">
         {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
+        <p className="text-[11px] mb-4 text-center" style={{ ...body, color: T.ashFaint }}>
+          Checkout opens in a new browser tab. Once you're done on Stripe's page, just come back here — this updates on its own once it's confirmed.
+        </p>
         <div className="flex flex-col gap-3">
           {SUBSCRIPTION_TIERS.map((tier) => (
             <div key={tier.key} className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${tier.featured ? T.accent : T.line}` }}>
@@ -2602,7 +2612,7 @@ function BillingScreen({ profile, onBack }) {
                 className="w-full py-2.5 text-[13px] font-semibold"
                 style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loadingTier !== null && loadingTier !== tier.key ? 0.5 : 1 }}
               >
-                {loadingTier === tier.key ? "Redirecting to checkout…" : "Choose Plan"}
+                {loadingTier === tier.key ? "Opening Stripe…" : "Choose Plan"}
               </button>
             </div>
           ))}
@@ -2954,11 +2964,6 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         )}
 
         <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>Atlas Field Owner</p>
-        {/* Temporary, visible build marker — purely to confirm whether a
-            given fix has actually reached the device, given how many
-            rounds of "redeployed and reinstalled but still broken" this
-            specific bug has gone through. Safe to remove once resolved. */}
-        <p className="text-[9px] text-center mt-1" style={{ ...mono, color: T.line }}>build-check-v6-inset0</p>
       </div>
 
       {showLegal && (
@@ -3049,96 +3054,6 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 }
 
 /* ---------- App shell ---------- */
-// Temporary — gives real, on-screen numbers so we can see what's actually
-// happening rather than continuing to guess at CSS theories blind, given
-// how many of those have already failed for this exact bug. Re-measures
-// on an interval specifically so it reflects the real state whenever a
-// screenshot gets taken, not just whatever was true on initial mount.
-// Safe to remove entirely once this is resolved.
-function DiagnosticHeightBadge() {
-  const [stats, setStats] = useState({});
-
-  useEffect(() => {
-    const measure = () => {
-      const shellEl = document.querySelector(".app-shell-height");
-      const rootEl = document.getElementById("root");
-      const navWrapperEl = document.querySelector(".nav-wrapper-debug");
-      const navEl = document.querySelector(".owner-bottom-nav-debug");
-      let navInfo = "not in DOM";
-      if (navEl) {
-        const rect = navEl.getBoundingClientRect();
-        const computed = window.getComputedStyle(navEl);
-        navInfo = `top:${Math.round(rect.top)} bot:${Math.round(rect.bottom)} disp:${computed.display} vis:${computed.visibility} op:${computed.opacity}`;
-      }
-      // What's actually stacked at a point roughly where "My Fields"
-      // should be, topmost first — this tells us definitively what's
-      // covering the content rather than guessing at which element it
-      // could be.
-      // Probed using the corrected height, not window.innerHeight — that
-      // was a real mistake in this diagnostic itself, not a finding about
-      // the app: innerHeight is the corrupted value (661), so the last
-      // probe was actually checking around y=561, nowhere near the nav's
-      // own real position at all.
-      const realHeight = shellEl ? shellEl.getBoundingClientRect().height : window.innerHeight;
-      const probeX = Math.round(window.innerWidth / 2);
-      const probeY = Math.round(realHeight - 30);
-      const stack = document.elementsFromPoint(probeX, probeY)
-        .slice(0, 4)
-        .map((el) => `${el.tagName.toLowerCase()}.${Array.from(el.classList).slice(0, 2).join(".")}`)
-        .join(" > ");
-      setStats({
-        innerH: window.innerHeight,
-        vvH: window.visualViewport ? Math.round(window.visualViewport.height) : "n/a",
-        rootH: rootEl ? Math.round(rootEl.getBoundingClientRect().height) : "n/a",
-        shellH: shellEl ? Math.round(shellEl.getBoundingClientRect().height) : "n/a",
-        navWrapH: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().height) : "n/a",
-        navWrapTop: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().top) : "n/a",
-        navInfo,
-        stack,
-        screenH: window.screen ? window.screen.height : "n/a",
-      });
-    };
-    measure();
-    const interval = setInterval(measure, 500);
-    window.addEventListener("resize", measure);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        top: 4,
-        right: 4,
-        zIndex: 99999,
-        background: "rgba(0,0,0,0.75)",
-        color: "#0f0",
-        fontSize: 9,
-        fontFamily: "monospace",
-        padding: "4px 6px",
-        borderRadius: 4,
-        lineHeight: 1.4,
-        pointerEvents: "none",
-        maxWidth: "60vw",
-        wordBreak: "break-all",
-      }}
-    >
-      innerH: {stats.innerH}<br />
-      vvH: {stats.vvH}<br />
-      rootH: {stats.rootH}<br />
-      shellH: {stats.shellH}<br />
-      navWrapH: {stats.navWrapH}<br />
-      navWrapTop: {stats.navWrapTop}<br />
-      nav: {stats.navInfo}<br />
-      stack: {stats.stack}<br />
-      screenH: {stats.screenH}
-    </div>
-  );
-}
-
 export default function App() {
   // Sets the real, trustworthy height — but not from window.screen.height
   // alone, since that's the *physical* screen including the area behind
@@ -3421,8 +3336,7 @@ export default function App() {
       style={{ background: T.void }}
     >
       <style>{FONTS}</style>
-      <DiagnosticHeightBadge />
-      <div className="flex-1 min-h-0 relative nav-wrapper-debug">
+      <div className="flex-1 min-h-0 relative">
         {content}
         {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
       </div>
