@@ -11,7 +11,8 @@ import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBann
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
-import { db, storage } from "./lib/firebase";
+import { db, storage, functions } from "./lib/firebase";
+import { httpsCallable } from "firebase/functions";
 import { collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
@@ -2432,7 +2433,146 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 }
 
 /* ---------- Settings ---------- */
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onLogout }) {
+const SUBSCRIPTION_TIERS = [
+  { key: "starter", name: "Starter", price: "$100", desc: "For a single field running open plays every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
+  { key: "pro", name: "Pro", price: "$200", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
+  { key: "enterprise", name: "Enterprise", price: "$500", desc: "For multi-location operators running at scale.", features: ["Unlimited fields", "Unlimited published events", "Unlimited players per event", "Live roster & QR check-in", "Saved waivers"] },
+];
+
+// The real subscription screen — first time this app calls an actual
+// Cloud Function rather than talking to Firestore directly. Deliberately
+// honest about states this doesn't fully handle yet: past_due has no
+// self-serve "update payment method" flow (that's a separate Stripe
+// billing-portal integration, not built), so it points to support instead
+// of pretending to solve it.
+function BillingScreen({ profile, onBack }) {
+  const [loadingTier, setLoadingTier] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleChoosePlan = async (tier) => {
+    setLoadingTier(tier);
+    setError("");
+    try {
+      const createCheckout = httpsCallable(functions, "createSubscriptionCheckout");
+      const result = await createCheckout({ tier });
+      window.location.href = result.data.url;
+    } catch (err) {
+      console.error("createSubscriptionCheckout failed:", err);
+      setError("Couldn't start checkout — try again, or reach out on Discord if it keeps happening.");
+      setLoadingTier(null);
+    }
+  };
+
+  const header = (
+    <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+      <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+        <ChevronLeft size={20} color={T.ash} />
+      </button>
+      <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Billing</h1>
+    </div>
+  );
+
+  // Comped account (The Compound, as launch partner) — free forever, no
+  // billing UI relevant to them at all.
+  if (profile?.comped) {
+    return (
+      <div className="h-full overflow-y-auto" style={flatBg}>
+        {header}
+        <div className="px-6 pt-8 text-center">
+          <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center" style={{ background: T.good, borderRadius: 999 }}>
+            <Check size={22} color="#FFFFFF" strokeWidth={3} />
+          </div>
+          <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Free, permanent access</div>
+          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>As one of our launch partners, you'll never be billed for Atlas.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const status = profile?.subscriptionStatus;
+  const currentTier = SUBSCRIPTION_TIERS.find((t) => t.key === profile?.subscriptionTier);
+
+  if (status === "active" || status === "trialing") {
+    return (
+      <div className="h-full overflow-y-auto" style={flatBg}>
+        {header}
+        <div className="px-6 pt-6">
+          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.good}` }}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>{status === "trialing" ? "FREE TRIAL" : "ACTIVE"}</span>
+            </div>
+            <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{currentTier?.name || profile.subscriptionTier} — {currentTier?.price || ""}/mo</div>
+            {profile.currentPeriodEnd?.toDate && (
+              <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>
+                {status === "trialing" ? "Trial ends" : "Renews"} {profile.currentPeriodEnd.toDate().toLocaleDateString()}
+              </p>
+            )}
+          </div>
+          <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>To change plans or cancel, reach out on Discord for now.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "past_due" || status === "unpaid") {
+    return (
+      <div className="h-full overflow-y-auto" style={flatBg}>
+        {header}
+        <div className="px-6 pt-6">
+          <div className="p-4 mb-4" style={{ background: "rgba(188,51,39,0.08)", border: `1px solid ${T.alert}`, borderRadius: 8 }}>
+            <div className="text-[14px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payment issue on your account</div>
+            <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+              Your last payment didn't go through. Updating your card isn't self-serve here yet — reach out on Discord and we'll sort it out directly.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No subscription yet, or a previously canceled one — show the real
+  // tier picker.
+  return (
+    <div className="h-full overflow-y-auto pb-10" style={flatBg}>
+      {header}
+      <div className="px-6 pt-6">
+        {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
+        <div className="flex flex-col gap-3">
+          {SUBSCRIPTION_TIERS.map((tier) => (
+            <div key={tier.key} className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${tier.featured ? T.accent : T.line}` }}>
+              {tier.featured && (
+                <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: "#FFFFFF", background: T.accent, borderRadius: 2 }}>MOST POPULAR</span>
+              )}
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{tier.name}</span>
+                <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>{tier.price}<span className="text-[11px]" style={{ color: T.ashFaint }}>/mo</span></span>
+              </div>
+              <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>{tier.desc}</p>
+              <ul className="mb-3">
+                {tier.features.map((f) => (
+                  <li key={f} className="text-[11px] flex items-center gap-1.5 mb-1" style={{ ...body, color: T.ashDim }}>
+                    <Check size={11} color={T.good} /> {f}
+                  </li>
+                ))}
+              </ul>
+              <div className="text-[10px] font-semibold mb-2" style={{ ...body, color: T.good }}>First month free</div>
+              <button
+                onClick={() => handleChoosePlan(tier.key)}
+                disabled={loadingTier !== null}
+                className="w-full py-2.5 text-[13px] font-semibold"
+                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loadingTier !== null && loadingTier !== tier.key ? 0.5 : 1 }}
+              >
+                {loadingTier === tier.key ? "Redirecting to checkout…" : "Choose Plan"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onLogout }) {
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -2540,6 +2680,18 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <div className="mb-6">
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
+
+        <Eyebrow>Billing</Eyebrow>
+        <button
+          onClick={onOpenBilling}
+          className="w-full mb-6 p-4 flex items-center justify-between"
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+        >
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
+            {profile?.comped ? "Free, permanent access" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
+          </span>
+          <ChevronRight size={16} color={T.ashFaint} />
+        </button>
 
         <Eyebrow>Security</Eyebrow>
         <button
@@ -2849,6 +3001,8 @@ export default function App() {
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); }}
       />
     );
+  } else if (overlay === "billing") {
+    content = <BillingScreen profile={profile} onBack={closeOverlay} />;
   } else if (overlay === "field" && activeField) {
     content = (
       <FieldOverviewScreen
@@ -2941,6 +3095,7 @@ export default function App() {
           updateOwnerName={updateOwnerName}
           changePassword={changePassword}
           deleteAccount={deleteAccount}
+          onOpenBilling={() => setOverlay("billing")}
           onLogout={handleLogout}
         />
       );
