@@ -34,12 +34,17 @@ const T = {
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 .app-shell-height {
-  height: 100vh;
-  height: 100dvh;
-  /* The real, actively-measured fallback — takes over the instant the
-     effect above runs, which is fast enough that the vh/dvh values above
-     are really just there to cover the brief instant before that. */
-  height: var(--real-app-height, 100dvh);
+  /* Four attempts at calculating "100% of the viewport height" — via
+     vh, dvh, and two different JS measurement strategies — all still hit
+     the same bug after returning from Stripe. Rather than try a fifth way
+     to calculate a height value, this sidesteps the calculation
+     entirely: position: fixed + inset: 0 anchors directly to all four
+     real edges of the viewport at the compositing level, with no height
+     arithmetic involved at all. Nothing to measure means nothing to
+     mismeasure.
+  */
+  position: fixed;
+  inset: 0;
 }
 `;
 const display = { fontFamily: "'Space Grotesk', sans-serif" };
@@ -3028,42 +3033,6 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 
 /* ---------- App shell ---------- */
 export default function App() {
-  // The CSS 100dvh fix from before turned out not to be enough on its own
-  // — dvh is the right idea, but on iOS specifically there's a known
-  // timing quirk where the browser's dynamic-viewport calculation doesn't
-  // always settle correctly the instant a page loads right after a
-  // redirect (like returning from Stripe), since the browser's own chrome
-  // hasn't fully finished settling into its final state yet at that exact
-  // moment. A pure CSS unit can't account for that; only actively
-  // measuring and re-measuring the real, current viewport can. This sets
-  // a real pixel value as a CSS variable, on mount and on every resize
-  // (visualViewport specifically, since it tracks the actual visible
-  // area more reliably than the window's own resize event on mobile).
-  useEffect(() => {
-    const setRealHeight = () => {
-      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      document.documentElement.style.setProperty("--real-app-height", `${vh}px`);
-    };
-    setRealHeight();
-    // The real bug that was still slipping through: a single measurement
-    // taken immediately on mount can race against the browser's own UI
-    // (address bar, toolbar) still settling into its final state right
-    // after a redirect like returning from Stripe — capturing a height
-    // that's shorter than the true, final screen, and locking that
-    // shorter value in as if it were correct. Re-checking a few times
-    // over the next second catches the real, settled value once the
-    // browser's chrome has actually finished transitioning, rather than
-    // trusting whatever the very first snapshot happened to catch.
-    const settleTimers = [100, 300, 600, 1000].map((delay) => setTimeout(setRealHeight, delay));
-    window.visualViewport?.addEventListener("resize", setRealHeight);
-    window.addEventListener("resize", setRealHeight);
-    return () => {
-      settleTimers.forEach(clearTimeout);
-      window.visualViewport?.removeEventListener("resize", setRealHeight);
-      window.removeEventListener("resize", setRealHeight);
-    };
-  }, []);
-
   // Same gating logic as the player app: only phones and tablets (iPad
   // matches the iOS check, Android tablets match the Android check) get
   // hard-gated — desktop browsers don't have the same "installed app vs.
