@@ -33,6 +33,10 @@ const T = {
 };
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+.app-shell-height {
+  height: 100vh;
+  height: 100dvh;
+}
 `;
 const display = { fontFamily: "'Space Grotesk', sans-serif" };
 const body = { fontFamily: "'Inter', sans-serif" };
@@ -3215,7 +3219,10 @@ export default function App() {
   }
 
   return (
-    <div className="w-full h-screen flex flex-col" style={{ background: T.void }}>
+    <div
+      className="w-full flex flex-col app-shell-height"
+      style={{ background: T.void }}
+    >
       <style>{FONTS}</style>
       <div className="flex-1 min-h-0 relative">
         {content}
