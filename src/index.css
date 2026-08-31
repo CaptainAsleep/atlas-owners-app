@@ -6,4 +6,18 @@ html, body, #root {
   height: 100%;
   margin: 0;
   background-color: #F2F2ED;
+  /* The page itself should never scroll — every screen inside the app
+     handles its own internal scrolling individually where needed. If the
+     outer page could scroll even slightly (a real risk here, since this
+     height: 100% is calculated completely separately from the dvh/JS-
+     measured height applied to the app's own inner container), the whole
+     page shifting would explain a bottom-anchored element appearing to
+     move even though it's still correctly positioned within its own
+     container. This removes that possibility outright, regardless of any
+     mismatch between this outer chain and the inner container's own
+     height calculation.
+  */
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
 }
