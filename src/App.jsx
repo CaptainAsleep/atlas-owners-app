@@ -3061,8 +3061,14 @@ function DiagnosticHeightBadge() {
       // should be, topmost first — this tells us definitively what's
       // covering the content rather than guessing at which element it
       // could be.
+      // Probed using the corrected height, not window.innerHeight — that
+      // was a real mistake in this diagnostic itself, not a finding about
+      // the app: innerHeight is the corrupted value (661), so the last
+      // probe was actually checking around y=561, nowhere near the nav's
+      // own real position at all.
+      const realHeight = shellEl ? shellEl.getBoundingClientRect().height : window.innerHeight;
       const probeX = Math.round(window.innerWidth / 2);
-      const probeY = Math.round(window.innerHeight - 100);
+      const probeY = Math.round(realHeight - 30);
       const stack = document.elementsFromPoint(probeX, probeY)
         .slice(0, 4)
         .map((el) => `${el.tagName.toLowerCase()}.${Array.from(el.classList).slice(0, 2).join(".")}`)
