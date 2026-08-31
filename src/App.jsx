@@ -3049,11 +3049,14 @@ function DiagnosticHeightBadge() {
     const measure = () => {
       const shellEl = document.querySelector(".app-shell-height");
       const rootEl = document.getElementById("root");
+      const navWrapperEl = document.querySelector(".nav-wrapper-debug");
       setStats({
         innerH: window.innerHeight,
         vvH: window.visualViewport ? Math.round(window.visualViewport.height) : "n/a",
         rootH: rootEl ? Math.round(rootEl.getBoundingClientRect().height) : "n/a",
         shellH: shellEl ? Math.round(shellEl.getBoundingClientRect().height) : "n/a",
+        navWrapH: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().height) : "n/a",
+        navWrapTop: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().top) : "n/a",
         screenH: window.screen ? window.screen.height : "n/a",
       });
     };
@@ -3087,6 +3090,8 @@ function DiagnosticHeightBadge() {
       vvH: {stats.vvH}<br />
       rootH: {stats.rootH}<br />
       shellH: {stats.shellH}<br />
+      navWrapH: {stats.navWrapH}<br />
+      navWrapTop: {stats.navWrapTop}<br />
       screenH: {stats.screenH}
     </div>
   );
@@ -3362,7 +3367,7 @@ export default function App() {
     >
       <style>{FONTS}</style>
       <DiagnosticHeightBadge />
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 relative nav-wrapper-debug">
         {content}
         {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
       </div>
