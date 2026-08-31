@@ -2942,6 +2942,11 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         )}
 
         <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>Atlas Field Owner</p>
+        {/* Temporary, visible build marker — purely to confirm whether a
+            given fix has actually reached the device, given how many
+            rounds of "redeployed and reinstalled but still broken" this
+            specific bug has gone through. Safe to remove once resolved. */}
+        <p className="text-[9px] text-center mt-1" style={{ ...mono, color: T.line }}>build-check-v6-inset0</p>
       </div>
 
       {showLegal && (
