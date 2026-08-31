@@ -39,12 +39,11 @@ const FONTS = `
      "smart app banner" corrupts window.innerHeight/visualViewport.height
      for the site you return to — even with no banner ever visible there.
      Every previous attempt correctly trusted those values as ground
-     truth; the browser itself was the one lying. window.screen.height
-     stays genuinely reliable through this bug (confirmed directly: 844
-     in both the broken and working states), so this bypasses the
-     corrupted measurement entirely rather than trying to out-clever it.
+     truth; the browser itself was the one lying. --real-screen-height
+     (set above) is the largest height genuinely observed this session,
+     from before the bug had a chance to corrupt anything.
   */
-  height: calc(var(--real-screen-height, 100vh) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  height: var(--real-screen-height, 100vh);
 }
 `;
 const display = { fontFamily: "'Space Grotesk', sans-serif" };
@@ -3094,17 +3093,31 @@ function DiagnosticHeightBadge() {
 }
 
 export default function App() {
-  // Sets the one measurement confirmed to survive the WebKit bug above —
-  // window.screen.height, not window.innerHeight or visualViewport.height,
-  // both of which get corrupted by it. env(safe-area-inset-*) handles the
-  // status bar directly in CSS, no JS needed for that part.
+  // Sets the real, trustworthy height — but not from window.screen.height
+  // alone, since that's the *physical* screen including the area behind
+  // the status bar, and env(safe-area-inset-*) proved unreliable here for
+  // subtracting that back out (a real, separately-documented quirk of
+  // that CSS feature). Instead: remember the largest innerHeight ever
+  // seen in this session. The WebKit bug above only ever *shrinks* the
+  // reported height after a redirect — it never grows it — so the
+  // largest value observed is always the one genuinely worth trusting,
+  // and sessionStorage carries it across the round-trip to Stripe and
+  // back, where the corruption actually happens.
   useEffect(() => {
-    const setRealScreenHeight = () => {
-      document.documentElement.style.setProperty("--real-screen-height", `${window.screen.height}px`);
+    const setRealHeight = () => {
+      const current = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const cached = parseInt(sessionStorage.getItem("atlas-known-good-height") || "0", 10);
+      const real = Math.max(current, cached);
+      sessionStorage.setItem("atlas-known-good-height", String(real));
+      document.documentElement.style.setProperty("--real-screen-height", `${real}px`);
     };
-    setRealScreenHeight();
-    window.addEventListener("resize", setRealScreenHeight);
-    return () => window.removeEventListener("resize", setRealScreenHeight);
+    setRealHeight();
+    window.visualViewport?.addEventListener("resize", setRealHeight);
+    window.addEventListener("resize", setRealHeight);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", setRealHeight);
+      window.removeEventListener("resize", setRealHeight);
+    };
   }, []);
 
   // Same gating logic as the player app: only phones and tablets (iPad
