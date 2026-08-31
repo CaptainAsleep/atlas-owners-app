@@ -2627,7 +2627,16 @@ function PayoutsScreen({ profile, onBack }) {
     try {
       const createLink = httpsCallable(functions, "createConnectOnboardingLink");
       const result = await createLink();
-      window.location.href = result.data.url;
+      // Opens in a genuinely separate tab rather than navigating this
+      // app's own window away — a real, confirmed WebKit bug corrupts
+      // this specific PWA's rendering after returning from an external
+      // site through the same tab. Opening separately means this tab
+      // never actually leaves, so it never has the chance to hit that
+      // bug at all. Its own live connection to your account data also
+      // never drops, so "Payouts Active" should update here on its own
+      // the moment Stripe confirms it — no manual refresh needed.
+      window.open(result.data.url, "_blank");
+      setLoading(false);
     } catch (err) {
       console.error("createConnectOnboardingLink failed:", err);
       setError("Couldn't start setup — try again, or reach out on Discord if it keeps happening.");
@@ -2673,6 +2682,10 @@ function PayoutsScreen({ profile, onBack }) {
             When players book your events, their payment goes to you directly — Atlas only takes its own booking fee, never a cut of your entry price.
             You'll enter your bank details on Stripe's own secure page, not here — Atlas never sees or stores that information.
           </p>
+          <p className="text-[11px] mb-4" style={{ ...body, color: T.ashFaint }}>
+            This opens in a new browser tab, not inside this app. Once you finish on Stripe's page, just come back and close that tab — this screen will
+            update on its own once it's confirmed.
+          </p>
           {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
           <button
             onClick={handleSetUpPayouts}
@@ -2680,7 +2693,7 @@ function PayoutsScreen({ profile, onBack }) {
             className="w-full py-3 text-[13px] font-semibold"
             style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loading ? 0.6 : 1 }}
           >
-            {loading ? "Redirecting to Stripe…" : alreadyStarted ? "Continue Setup" : "Set Up Payouts"}
+            {loading ? "Opening Stripe…" : alreadyStarted ? "Continue Setup" : "Set Up Payouts"}
           </button>
         </div>
       </div>
