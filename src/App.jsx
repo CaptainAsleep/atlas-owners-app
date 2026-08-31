@@ -2100,7 +2100,7 @@ function OwnerBottomNav({ active, onNavigate }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
   return (
-    <div className="absolute bottom-0 left-0 right-0 border-t" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
+    <div className="absolute bottom-0 left-0 right-0 border-t owner-bottom-nav-debug" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
       <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 20 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
@@ -3050,6 +3050,23 @@ function DiagnosticHeightBadge() {
       const shellEl = document.querySelector(".app-shell-height");
       const rootEl = document.getElementById("root");
       const navWrapperEl = document.querySelector(".nav-wrapper-debug");
+      const navEl = document.querySelector(".owner-bottom-nav-debug");
+      let navInfo = "not in DOM";
+      if (navEl) {
+        const rect = navEl.getBoundingClientRect();
+        const computed = window.getComputedStyle(navEl);
+        navInfo = `top:${Math.round(rect.top)} bot:${Math.round(rect.bottom)} disp:${computed.display} vis:${computed.visibility} op:${computed.opacity}`;
+      }
+      // What's actually stacked at a point roughly where "My Fields"
+      // should be, topmost first — this tells us definitively what's
+      // covering the content rather than guessing at which element it
+      // could be.
+      const probeX = Math.round(window.innerWidth / 2);
+      const probeY = Math.round(window.innerHeight - 100);
+      const stack = document.elementsFromPoint(probeX, probeY)
+        .slice(0, 4)
+        .map((el) => `${el.tagName.toLowerCase()}.${Array.from(el.classList).slice(0, 2).join(".")}`)
+        .join(" > ");
       setStats({
         innerH: window.innerHeight,
         vvH: window.visualViewport ? Math.round(window.visualViewport.height) : "n/a",
@@ -3057,6 +3074,8 @@ function DiagnosticHeightBadge() {
         shellH: shellEl ? Math.round(shellEl.getBoundingClientRect().height) : "n/a",
         navWrapH: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().height) : "n/a",
         navWrapTop: navWrapperEl ? Math.round(navWrapperEl.getBoundingClientRect().top) : "n/a",
+        navInfo,
+        stack,
         screenH: window.screen ? window.screen.height : "n/a",
       });
     };
@@ -3084,6 +3103,8 @@ function DiagnosticHeightBadge() {
         borderRadius: 4,
         lineHeight: 1.4,
         pointerEvents: "none",
+        maxWidth: "60vw",
+        wordBreak: "break-all",
       }}
     >
       innerH: {stats.innerH}<br />
@@ -3092,6 +3113,8 @@ function DiagnosticHeightBadge() {
       shellH: {stats.shellH}<br />
       navWrapH: {stats.navWrapH}<br />
       navWrapTop: {stats.navWrapTop}<br />
+      nav: {stats.navInfo}<br />
+      stack: {stats.stack}<br />
       screenH: {stats.screenH}
     </div>
   );
