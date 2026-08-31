@@ -2572,7 +2572,83 @@ function BillingScreen({ profile, onBack }) {
   );
 }
 
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onLogout }) {
+// The "get paid for player bookings" half — entirely separate from
+// BillingScreen above, both conceptually and in what it actually calls.
+// Same account architecture principle as subscriptions: this screen never
+// asks for or sees a bank account number — the owner enters that directly
+// with Stripe, on Stripe's own hosted page.
+function PayoutsScreen({ profile, onBack }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSetUpPayouts = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const createLink = httpsCallable(functions, "createConnectOnboardingLink");
+      const result = await createLink();
+      window.location.href = result.data.url;
+    } catch (err) {
+      console.error("createConnectOnboardingLink failed:", err);
+      setError("Couldn't start setup — try again, or reach out on Discord if it keeps happening.");
+      setLoading(false);
+    }
+  };
+
+  const header = (
+    <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+      <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
+        <ChevronLeft size={20} color={T.ash} />
+      </button>
+      <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Payouts</h1>
+    </div>
+  );
+
+  if (profile?.payoutsEnabled) {
+    return (
+      <div className="h-full overflow-y-auto" style={flatBg}>
+        {header}
+        <div className="px-6 pt-8 text-center">
+          <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center" style={{ background: T.good, borderRadius: 999 }}>
+            <Check size={22} color="#FFFFFF" strokeWidth={3} />
+          </div>
+          <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payouts active</div>
+          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Your Stripe account is set up to receive player booking payments directly.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const alreadyStarted = !!profile?.stripeConnectAccountId;
+
+  return (
+    <div className="h-full overflow-y-auto" style={flatBg}>
+      {header}
+      <div className="px-6 pt-8">
+        <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+          <div className="text-[14px] font-semibold mb-2" style={{ ...display, color: T.ash }}>
+            {alreadyStarted ? "Finish setting up payouts" : "Set up payouts"}
+          </div>
+          <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>
+            When players book your events, their payment goes to you directly — Atlas only takes its own booking fee, never a cut of your entry price.
+            You'll enter your bank details on Stripe's own secure page, not here — Atlas never sees or stores that information.
+          </p>
+          {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+          <button
+            onClick={handleSetUpPayouts}
+            disabled={loading}
+            className="w-full py-3 text-[13px] font-semibold"
+            style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loading ? 0.6 : 1 }}
+          >
+            {loading ? "Redirecting to Stripe…" : alreadyStarted ? "Continue Setup" : "Set Up Payouts"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onOpenPayouts, onLogout }) {
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -2684,11 +2760,21 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <Eyebrow>Billing</Eyebrow>
         <button
           onClick={onOpenBilling}
-          className="w-full mb-6 p-4 flex items-center justify-between"
+          className="w-full mb-3 p-4 flex items-center justify-between"
           style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
         >
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
             {profile?.comped ? "Free, permanent access" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
+          </span>
+          <ChevronRight size={16} color={T.ashFaint} />
+        </button>
+        <button
+          onClick={onOpenPayouts}
+          className="w-full mb-6 p-4 flex items-center justify-between"
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+        >
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
+            {profile?.payoutsEnabled ? "Payouts Active" : "Set Up Payouts"}
           </span>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
@@ -3003,6 +3089,8 @@ export default function App() {
     );
   } else if (overlay === "billing") {
     content = <BillingScreen profile={profile} onBack={closeOverlay} />;
+  } else if (overlay === "payouts") {
+    content = <PayoutsScreen profile={profile} onBack={closeOverlay} />;
   } else if (overlay === "field" && activeField) {
     content = (
       <FieldOverviewScreen
@@ -3096,6 +3184,7 @@ export default function App() {
           changePassword={changePassword}
           deleteAccount={deleteAccount}
           onOpenBilling={() => setOverlay("billing")}
+          onOpenPayouts={() => setOverlay("payouts")}
           onLogout={handleLogout}
         />
       );
