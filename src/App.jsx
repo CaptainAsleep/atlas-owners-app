@@ -2630,6 +2630,7 @@ function BillingScreen({ profile, onBack }) {
 function PayoutsScreen({ profile, onBack, checking }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [manualChecking, setManualChecking] = useState(false);
 
   const handleSetUpPayouts = async () => {
     setLoading(true);
@@ -2642,15 +2643,32 @@ function PayoutsScreen({ profile, onBack, checking }) {
       // this specific PWA's rendering after returning from an external
       // site through the same tab. Opening separately means this tab
       // never actually leaves, so it never has the chance to hit that
-      // bug at all. Its own live connection to your account data also
-      // never drops, so "Payouts Active" should update here on its own
-      // the moment Stripe confirms it — no manual refresh needed.
+      // bug at all.
       window.open(result.data.url, "_blank");
       setLoading(false);
     } catch (err) {
       console.error("createConnectOnboardingLink failed:", err);
       setError("Couldn't start setup — try again, or reach out on Discord if it keeps happening.");
       setLoading(false);
+    }
+  };
+
+  // A manual fallback, not relying on the tab-visibility detection above
+  // — that approach has proven unreliable in practice on iOS specifically
+  // (a known quirk with that browser event), so this gives a direct way
+  // to ask Stripe for the real, current status that doesn't depend on any
+  // browser event firing correctly at all.
+  const handleCheckStatus = async () => {
+    setManualChecking(true);
+    setError("");
+    try {
+      const checkStatus = httpsCallable(functions, "checkPayoutsStatus");
+      await checkStatus();
+    } catch (err) {
+      console.error("checkPayoutsStatus failed:", err);
+      setError("Couldn't check status — try again in a moment.");
+    } finally {
+      setManualChecking(false);
     }
   };
 
@@ -2708,6 +2726,16 @@ function PayoutsScreen({ profile, onBack, checking }) {
           >
             {loading ? "Opening Stripe…" : alreadyStarted ? "Continue Setup" : "Set Up Payouts"}
           </button>
+          {alreadyStarted && (
+            <button
+              onClick={handleCheckStatus}
+              disabled={manualChecking}
+              className="w-full py-2.5 text-[12px] font-medium mt-2"
+              style={{ ...body, color: T.accent, opacity: manualChecking ? 0.6 : 1 }}
+            >
+              {manualChecking ? "Checking…" : "Already finished on Stripe? Check status"}
+            </button>
+          )}
         </div>
       </div>
     </div>
