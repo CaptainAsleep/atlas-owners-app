@@ -2834,9 +2834,10 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <button
           onClick={onOpenPayouts}
           className="w-full mb-6 p-4 flex items-center justify-between"
-          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${profile?.payoutsEnabled ? T.good : T.line}` }}
         >
-          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
+          <span className="text-[13px] font-medium flex items-center gap-1.5" style={{ ...body, color: profile?.payoutsEnabled ? T.good : T.ash }}>
+            {profile?.payoutsEnabled && <Check size={14} strokeWidth={2.5} />}
             {profile?.payoutsEnabled ? "Payouts Active" : "Set Up Payouts"}
           </span>
           <ChevronRight size={16} color={T.ashFaint} />
