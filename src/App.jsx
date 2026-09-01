@@ -2630,6 +2630,30 @@ function BillingScreen({ profile, onBack }) {
 function PayoutsScreen({ profile, onBack }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  // Rather than wait on a webhook event that's proven unreliable here,
+  // this actively re-checks Stripe directly the moment you come back to
+  // this tab (e.g. after finishing setup in the separate tab it opened).
+  // Only worth doing once there's a real account to check and it isn't
+  // already confirmed active.
+  useEffect(() => {
+    if (!profile?.stripeConnectAccountId || profile?.payoutsEnabled) return;
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      setChecking(true);
+      try {
+        const checkStatus = httpsCallable(functions, "checkPayoutsStatus");
+        await checkStatus();
+      } catch (err) {
+        console.error("checkPayoutsStatus failed:", err);
+      } finally {
+        setChecking(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [profile?.stripeConnectAccountId, profile?.payoutsEnabled]);
 
   const handleSetUpPayouts = async () => {
     setLoading(true);
@@ -2688,6 +2712,9 @@ function PayoutsScreen({ profile, onBack }) {
           <div className="text-[14px] font-semibold mb-2" style={{ ...display, color: T.ash }}>
             {alreadyStarted ? "Finish setting up payouts" : "Set up payouts"}
           </div>
+          {checking && (
+            <p className="text-[11px] mb-2" style={{ ...body, color: T.accent }}>Checking your status with Stripe…</p>
+          )}
           <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>
             When players book your events, their payment goes to you directly — Atlas only takes its own booking fee, never a cut of your entry price.
             You'll enter your bank details on Stripe's own secure page, not here — Atlas never sees or stores that information.
