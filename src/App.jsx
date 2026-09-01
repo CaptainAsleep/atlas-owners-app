@@ -2627,33 +2627,9 @@ function BillingScreen({ profile, onBack }) {
 // Same account architecture principle as subscriptions: this screen never
 // asks for or sees a bank account number — the owner enters that directly
 // with Stripe, on Stripe's own hosted page.
-function PayoutsScreen({ profile, onBack }) {
+function PayoutsScreen({ profile, onBack, checking }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [checking, setChecking] = useState(false);
-
-  // Rather than wait on a webhook event that's proven unreliable here,
-  // this actively re-checks Stripe directly the moment you come back to
-  // this tab (e.g. after finishing setup in the separate tab it opened).
-  // Only worth doing once there's a real account to check and it isn't
-  // already confirmed active.
-  useEffect(() => {
-    if (!profile?.stripeConnectAccountId || profile?.payoutsEnabled) return;
-    const handleVisibility = async () => {
-      if (document.visibilityState !== "visible") return;
-      setChecking(true);
-      try {
-        const checkStatus = httpsCallable(functions, "checkPayoutsStatus");
-        await checkStatus();
-      } catch (err) {
-        console.error("checkPayoutsStatus failed:", err);
-      } finally {
-        setChecking(false);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [profile?.stripeConnectAccountId, profile?.payoutsEnabled]);
 
   const handleSetUpPayouts = async () => {
     setLoading(true);
@@ -3153,6 +3129,34 @@ export default function App() {
   }, []);
 
   const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount } = useOwnerAuth();
+
+  // App-level, not scoped to any one screen — a real gap in the earlier
+  // version: mobile Safari can silently reload a backgrounded tab to free
+  // memory while you're away on Stripe's separate tab, which resets React
+  // state and lands you back on the Dashboard rather than wherever you
+  // actually left off. A check scoped to the Payouts screen specifically
+  // never got the chance to run in that case, since that screen no longer
+  // existed. Living here means it runs regardless of which screen you
+  // land back on.
+  const [checkingPayouts, setCheckingPayouts] = useState(false);
+  useEffect(() => {
+    if (!profile?.stripeConnectAccountId || profile?.payoutsEnabled) return;
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      setCheckingPayouts(true);
+      try {
+        const checkStatus = httpsCallable(functions, "checkPayoutsStatus");
+        await checkStatus();
+      } catch (err) {
+        console.error("checkPayoutsStatus failed:", err);
+      } finally {
+        setCheckingPayouts(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [profile?.stripeConnectAccountId, profile?.payoutsEnabled]);
+
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
@@ -3233,7 +3237,7 @@ export default function App() {
   } else if (overlay === "billing") {
     content = <BillingScreen profile={profile} onBack={closeOverlay} />;
   } else if (overlay === "payouts") {
-    content = <PayoutsScreen profile={profile} onBack={closeOverlay} />;
+    content = <PayoutsScreen profile={profile} onBack={closeOverlay} checking={checkingPayouts} />;
   } else if (overlay === "field" && activeField) {
     content = (
       <FieldOverviewScreen
