@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Real bookings for one event — a genuine commitment to attend, not just
@@ -76,4 +76,66 @@ export async function checkInFromScan(rawText, eventId) {
     return { ok: false, reason: "wrong-event" };
   }
   return checkInPlayer(eventId, uid);
+}
+
+
+// Real booking-fee revenue across every one of this owner's events, for
+// the Analytics screen. Same reasoning as the admin portal's version —
+// each event's own bookings subcollection, fetched directly rather than
+// a collectionGroup("bookings") query, which would double-count against
+// the player app's separate per-user mirror copy (see useAdminData.js's
+// comment for the full explanation of why that shape exists).
+//
+// One-shot per distinct set of event ids rather than a live listener per
+// event — refetches whenever the owner's event list actually changes
+// (new event created, one edited), which is "fresh enough" for a screen
+// someone glances at, not something that needs to update mid-keystroke.
+//
+// Reports the owner's own share (amountPaidCents minus Atlas's
+// bookingFeeCents) — the actual dollars that landed in their connected
+// Stripe account via the destination charge — not Atlas's own cut, which
+// wouldn't mean anything useful shown back to a field owner.
+export function useOwnerBookingRevenue(events) {
+  const [stats, setStats] = useState({ paidBookingsCount: 0, revenueCents: 0 });
+  const [loading, setLoading] = useState(true);
+  const eventIdsKey = events.map((e) => e.id).join(",");
+
+  useEffect(() => {
+    if (events.length === 0) {
+      setStats({ paidBookingsCount: 0, revenueCents: 0 });
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all(events.map((e) => getDocs(collection(db, "events", e.id, "bookings"))))
+      .then((snaps) => {
+        if (cancelled) return;
+        let paidBookingsCount = 0;
+        let revenueCents = 0;
+        snaps.forEach((snap) => {
+          snap.docs.forEach((d) => {
+            const b = d.data();
+            if (!b.paid) return;
+            paidBookingsCount += 1;
+            if (typeof b.amountPaidCents === "number") {
+              revenueCents += b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0);
+            }
+          });
+        });
+        setStats({ paidBookingsCount, revenueCents });
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("useOwnerBookingRevenue error:", err);
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+    // eventIdsKey, not events itself — events is a fresh array reference
+    // on every parent render (from useOwnerEvents' onSnapshot), which
+    // would otherwise refetch every single render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventIdsKey]);
+
+  return { paidBookingsCount: stats.paidBookingsCount, revenueCents: stats.revenueCents, statsLoading: loading };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../lib/firebase";
 
 // Every field, for the "claim a field" search/browse flow. Same public
 // data the player app already reads — no separate owner-facing copy of
@@ -86,26 +87,64 @@ export function useMyPendingClaims(uid) {
 }
 
 export function useFieldActions() {
-  // Two real paths, matching the Firestore rules exactly:
-  //  - Fields with a known ownerEmailDomain (a real website on file) claim
-  //    instantly IF the claiming account's email matches that domain — the
-  //    domain match IS the verification, no human review needed.
-  //  - Fields with no domain to verify against (Facebook-only fields, the
-  //    Atlas Field test fixture) file a pending request instead, which
-  //    only becomes a real claim via manual approval in the Firestore
-  //    console — same "no admin panel yet" pattern used everywhere else.
-  // Returns "claimed" or "pending" so the UI can show the right message.
+  // Three real paths now, matching the Firestore rules and the new
+  // website-verification Cloud Functions:
+  //  - The claiming account's email matches the field's known
+  //    ownerEmailDomain -> instant, verified claim, written directly here
+  //    (Firestore rules enforce the domain match themselves too).
+  //  - Email doesn't match (or the field has no domain on file at all) but
+  //    the field DOES have a real website -> can't be verified client-side
+  //    at all, so this returns "verify-website" instead of writing
+  //    anything; the caller drives requestClaimCode/verifyWebsiteClaim
+  //    below, which do the actual write server-side once the code is
+  //    confirmed live on that site. This is the fix for "owners with a
+  //    different email address than their domain name" — they're no
+  //    longer stuck, they just prove it a different way.
+  //  - No website on file at all (Facebook-only fields) -> nothing can be
+  //    automatically verified, so this claims instantly anyway rather than
+  //    stalling on manual review, flagged claimVerification: "unverified"
+  //    for a possible later spot-check. A bad claim here can only affect
+  //    listing content — Stripe's own KYC gates any real payout — so this
+  //    is a low-risk default, not a security hole.
+  // Returns "claimed", "verify-website", or "claimed-unverified" so the UI
+  // can show the right next step.
   async function claimField(field, ownerEmail, ownerId) {
-    if (field.ownerEmailDomain) {
-      const emailDomain = (ownerEmail || "").split("@")[1];
-      if (emailDomain !== field.ownerEmailDomain) {
-        throw new Error(`This field's claim requires an account email ending in @${field.ownerEmailDomain}.`);
-      }
-      await updateDoc(doc(db, "fields", field.id), { ownerId, claimed: true });
+    const emailDomain = (ownerEmail || "").split("@")[1];
+    if (field.ownerEmailDomain && emailDomain === field.ownerEmailDomain) {
+      await updateDoc(doc(db, "fields", field.id), {
+        ownerId,
+        claimed: true,
+        claimVerification: "domain",
+      });
       return "claimed";
     }
-    await updateDoc(doc(db, "fields", field.id), { claimPending: true, claimRequestedBy: ownerId });
-    return "pending";
+    if (field.website) {
+      return "verify-website";
+    }
+    await updateDoc(doc(db, "fields", field.id), {
+      ownerId,
+      claimed: true,
+      claimVerification: "unverified",
+    });
+    return "claimed-unverified";
+  }
+
+  // Step 1 of the website-verification flow: ask the server for a short
+  // code to paste somewhere on the field's own site. Returns { code,
+  // website } — requesting a code grants nothing by itself.
+  async function requestClaimCode(fieldId) {
+    const requestCode = httpsCallable(functions, "requestFieldClaimCode");
+    const res = await requestCode({ fieldId });
+    return res.data;
+  }
+
+  // Step 2: tell the server to go fetch that site and look for the code.
+  // Returns { verified: boolean } — only a true result means the field was
+  // actually claimed (the Cloud Function does that write itself).
+  async function verifyWebsiteClaim(fieldId) {
+    const verify = httpsCallable(functions, "verifyWebsiteClaim");
+    const res = await verify({ fieldId });
+    return res.data;
   }
 
   // Accepts any subset of the same fields the player app already knows how
@@ -128,7 +167,7 @@ export function useFieldActions() {
     }
   }
 
-  return { claimField, updateFieldProfile };
+  return { claimField, requestClaimCode, verifyWebsiteClaim, updateFieldProfile };
 }
 
 // Banned players for a specific field — private to that field's owner.

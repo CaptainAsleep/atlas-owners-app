@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./leg
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useEventBookings, useOwnerBookingRevenue, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
 import { collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
@@ -474,11 +474,21 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
 }
 
 /* ---------- Claim a field ---------- */
-function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, onClaimed }) {
+function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, requestClaimCode, verifyWebsiteClaim, onClaimed }) {
   const [search, setSearch] = useState("");
   const [claimingId, setClaimingId] = useState(null);
   const [error, setError] = useState("");
   const [pendingMsg, setPendingMsg] = useState("");
+
+  // Website-verification sub-flow — opened instead of claiming directly
+  // when the claiming account's email doesn't match the field's domain
+  // (or there's no domain on file at all) but the field does have a real
+  // site to prove ownership of.
+  const [verifyField, setVerifyField] = useState(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyWebsiteUrl, setVerifyWebsiteUrl] = useState("");
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
 
   const filtered = allFields.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
 
@@ -488,15 +498,45 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
     setPendingMsg("");
     try {
       const result = await claimField(field, ownerEmail, ownerId);
-      if (result === "claimed") {
+      if (result === "claimed" || result === "claimed-unverified") {
         onClaimed(field.id);
-      } else {
-        setPendingMsg(`Claim request submitted for ${field.name} — this field has no verifiable website on file, so it needs manual review before you get full access.`);
+      } else if (result === "verify-website") {
+        setVerifyError("");
+        setVerifyCode("");
+        setVerifyWebsiteUrl(field.website || "");
+        setVerifyField(field);
+        try {
+          const codeRes = await requestClaimCode(field.id);
+          setVerifyCode(codeRes.code);
+          setVerifyWebsiteUrl(codeRes.website || field.website || "");
+        } catch (err) {
+          setVerifyError(err.message || "Couldn't start website verification — try again.");
+        }
       }
     } catch (err) {
       setError(err.message || "Couldn't claim that field — try again.");
     } finally {
       setClaimingId(null);
+    }
+  };
+
+  const handleVerifyWebsite = async () => {
+    if (!verifyField) return;
+    setVerifyLoading(true);
+    setVerifyError("");
+    try {
+      const res = await verifyWebsiteClaim(verifyField.id);
+      if (res.verified) {
+        const fieldId = verifyField.id;
+        setVerifyField(null);
+        onClaimed(fieldId);
+      } else {
+        setVerifyError("Didn't find that code on your site yet — make sure the page is saved and live, then try again.");
+      }
+    } catch (err) {
+      setVerifyError(err.message || "Couldn't verify — try again.");
+    } finally {
+      setVerifyLoading(false);
     }
   };
 
@@ -537,7 +577,11 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
                   <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
                   {!isClaimed && !isPending && (
                     <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>
-                      {f.ownerEmailDomain ? `Verified instantly with an @${f.ownerEmailDomain} email` : "No website on file — claim goes to manual review"}
+                      {f.ownerEmailDomain
+                        ? `Verified instantly with an @${f.ownerEmailDomain} email${f.website ? " — or verify your site instead if that's not your address" : ""}`
+                        : f.website
+                        ? "No matching email on file — verify instantly by proving you control the field's website"
+                        : "No website on file — claims instantly, flagged for review if ever disputed"}
                     </div>
                   )}
                 </div>
@@ -560,6 +604,42 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
           })
         )}
       </div>
+
+      {verifyField && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4 sm:pb-0" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div className="w-full sm:max-w-md p-6" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+            <h2 className="text-[16px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Verify {verifyField.name}</h2>
+            <p className="text-[12px] mb-3" style={{ ...body, color: T.ashFaint }}>
+              Paste the code below anywhere on your site's homepage ({verifyWebsiteUrl || verifyField.website}), save it live, then come back and tap Verify. No manual review needed once it's found.
+            </p>
+            {verifyCode ? (
+              <div className="mb-3 px-3 py-2 text-center text-[15px] font-mono select-all" style={{ background: T.bg, borderRadius: 4, border: `1px solid ${T.line}`, color: T.ash }}>
+                {verifyCode}
+              </div>
+            ) : (
+              <div className="text-[12px] mb-3" style={{ ...body, color: T.ashFaint }}>Generating your code…</div>
+            )}
+            {verifyError && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{verifyError}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setVerifyField(null)}
+                className="flex-1 px-3 py-2.5 text-[13px] font-semibold"
+                style={{ ...display, background: "transparent", color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 4 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleVerifyWebsite}
+                disabled={verifyLoading || !verifyCode}
+                className="flex-1 px-3 py-2.5 text-[13px] font-semibold"
+                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: verifyLoading || !verifyCode ? 0.6 : 1 }}
+              >
+                {verifyLoading ? "Checking…" : "I've added it — Verify"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1779,11 +1859,16 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
     return (
       <div key={uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{name}</div>
             {checkedIn && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
                 <Check size={9} /> CHECKED IN
+              </span>
+            )}
+            {matchingBooking?.paid && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.accent, border: `1px solid ${T.accent}`, borderRadius: 2 }}>
+                PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
               </span>
             )}
           </div>
@@ -1855,12 +1940,15 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Booked Players.csv`,
-                ["Callsign", "Booked At", "Checked In", "Checked In At"],
+                ["Callsign", "Booked At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
                   b.checkedIn ? "Yes" : "No",
                   b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
+                  b.paid ? "Yes" : "No",
+                  typeof b.amountPaidCents === "number" ? `$${(b.amountPaidCents / 100).toFixed(2)}` : "",
+                  b.stripeCheckoutSessionId || "",
                 ])
               )}
               className="text-[11px] font-semibold"
@@ -2102,8 +2190,15 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                     </button>
                   )}
                 </div>
-                <div className="text-[11px]" style={{ ...body, color: signedUids.has(b.uid) ? T.good : T.alert }}>
-                  {signedUids.has(b.uid) ? "✓ Waiver signed" : "⚠ No waiver signature found"}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-[11px]" style={{ ...body, color: signedUids.has(b.uid) ? T.good : T.alert }}>
+                    {signedUids.has(b.uid) ? "✓ Waiver signed" : "⚠ No waiver signature found"}
+                  </div>
+                  {b.paid && (
+                    <div className="text-[11px]" style={{ ...body, color: T.accent }}>
+                      ✓ Paid{typeof b.amountPaidCents === "number" ? ` $${(b.amountPaidCents / 100).toFixed(2)}` : ""}
+                    </div>
+                  )}
                 </div>
                 {feedback?.uid === b.uid && (
                   <div className="text-[11px] font-medium mt-1" style={{ ...body, color: feedback.ok ? T.good : T.alert }}>{feedback.message}</div>
@@ -2455,15 +2550,26 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
   const totalInterest = published.reduce((sum, e) => sum + (e.interestCount || 0), 0);
   const totalBooked = published.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
   const topEvents = [...published].filter((e) => e.interestCount > 0).sort((a, b) => (b.interestCount || 0) - (a.interestCount || 0)).slice(0, 5);
+  const { paidBookingsCount, revenueCents, statsLoading } = useOwnerBookingRevenue(published);
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4">
         <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>Analytics</div>
-        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Real numbers only — no revenue or ratings, since neither payments nor reviews exist yet.</p>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Real numbers only — no ratings yet, since reviews don't exist.</p>
       </div>
 
       <div className="px-6">
+        {!statsLoading && paidBookingsCount > 0 && (
+          <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <TrendingUp size={13} color={T.ashFaint} />
+              <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Ticket Revenue (Real, Paid Bookings)</span>
+            </div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.accent }}>${(revenueCents / 100).toFixed(2)}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>{paidBookingsCount} paid booking{paidBookingsCount === 1 ? "" : "s"} — your share after Atlas's booking fee, already sent to your connected Stripe account</div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Published Events</div>
@@ -3316,7 +3422,7 @@ export default function App() {
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
-  const { claimField, updateFieldProfile } = useFieldActions();
+  const { claimField, requestClaimCode, verifyWebsiteClaim, updateFieldProfile } = useFieldActions();
 
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard | events | analytics | roster | settings
   const [overlay, setOverlay] = useState(null); // null | claim | field | eventEdit | roster
@@ -3387,6 +3493,8 @@ export default function App() {
         ownerId={user.uid}
         ownerEmail={user.email}
         claimField={claimField}
+        requestClaimCode={requestClaimCode}
+        verifyWebsiteClaim={verifyWebsiteClaim}
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); }}
       />
     );
