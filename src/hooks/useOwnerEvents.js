@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Every event across this owner's claimed field(s) — if they own more than
@@ -61,8 +61,21 @@ export function useOwnerEventActions() {
     await updateDoc(doc(db, "events", eventId), data);
   }
 
+  // Soft delete — a real Firestore deleteDoc would also orphan this
+  // event's bookings subcollection (Firestore never cascades a delete to
+  // subcollections), which is exactly what made a deleted event's booking
+  // fee revenue vanish from the admin portal: its revenue query only ever
+  // looks at bookings under events still present in the top-level events
+  // collection. Marking it deleted instead keeps the event doc (and its
+  // real booking/revenue history) intact and queryable — same tradeoff
+  // already made for cancel — while restoreEvent below gives the owner a
+  // way back if it was a mistake.
   async function deleteEvent(eventId) {
-    await deleteDoc(doc(db, "events", eventId));
+    await updateDoc(doc(db, "events", eventId), { deleted: true, deletedAt: serverTimestamp() });
+  }
+
+  async function restoreEvent(eventId) {
+    await updateDoc(doc(db, "events", eventId), { deleted: false, deletedAt: null });
   }
 
   // Copies an existing event as a new draft — same details, new id, no
@@ -75,5 +88,5 @@ export function useOwnerEventActions() {
     return ref.id;
   }
 
-  return { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId };
+  return { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId };
 }

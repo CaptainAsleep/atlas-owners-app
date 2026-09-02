@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil, QrCode, X,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
@@ -271,8 +271,8 @@ function LoginScreen({ signIn, signUp }) {
 /* ---------- Dashboard ---------- */
 function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onLogout }) {
   const today = localDateStr();
-  const upcoming = events.filter((e) => !e.draft && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const totalInterest = events.reduce((sum, e) => sum + (e.interestCount || 0), 0);
+  const upcoming = events.filter((e) => !e.draft && !e.deleted && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const totalInterest = events.filter((e) => !e.deleted).reduce((sum, e) => sum + (e.interestCount || 0), 0);
   // Highest-level rollup — every upcoming, non-canceled, published event
   // across every field this owner manages, not just one field or event.
   const totalProjectedRevenue = upcoming.reduce((sum, e) => {
@@ -547,7 +547,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
   const [showDtbQr, setShowDtbQr] = useState(false);
   const [dtbQrUrl, setDtbQrUrl] = useState(null);
 
-  const fieldEvents = events.filter((e) => e.fieldId === field.id);
+  const fieldEvents = events.filter((e) => e.fieldId === field.id && !e.deleted);
   const today = new Date().toISOString().slice(0, 10);
   const upcoming = fieldEvents.filter((e) => !e.draft && (e.endDate || e.date) >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = fieldEvents.reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -1190,7 +1190,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         if (cancelled) return;
         const others = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((e) => e.fieldId !== field.id && !e.draft && e.id !== eventId)
+          .filter((e) => e.fieldId !== field.id && !e.draft && !e.deleted && e.id !== eventId)
           .filter((e) => {
             if (typeof field.lat !== "number" || typeof field.lng !== "number") return false;
             const otherField = allFields.find((f) => f.id === e.fieldId);
@@ -2118,8 +2118,8 @@ function OwnerBottomNav({ active, onNavigate }) {
 }
 
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
-function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, duplicateEvent, updateEvent }) {
-  const [tab, setTab] = useState("all");
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, restoreEvent, duplicateEvent, updateEvent }) {
+  const [tab, setTab] = useState("upcoming");
   const [searchQuery, setSearchQuery] = useState("");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -2130,9 +2130,13 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
 
   const filtered = events
     .filter((ev) => {
+      // A deleted event only ever lives under the Deleted tab, regardless
+      // of whatever draft/canceled state it was in when it was deleted —
+      // it shouldn't keep cluttering Drafts or Canceled too.
+      if (tab === "deleted") return ev.deleted === true;
+      if (ev.deleted) return false;
       if (tab === "canceled") return ev.canceled === true;
       if (tab === "drafts") return ev.draft === true;
-      if (tab === "all") return true; // genuinely all — drafts and canceled included
       if (ev.draft || ev.canceled) return false; // Upcoming/Past are date-based buckets; neither has a real confirmed slot anymore
       if (tab === "upcoming") return (ev.endDate || ev.date) >= today;
       if (tab === "past") return (ev.endDate || ev.date) < today;
@@ -2231,7 +2235,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
         </div>
 
         <div className="flex gap-1 mb-4 overflow-x-auto" style={{ borderBottom: `1px solid ${T.line}` }}>
-          {[["all", "All"], ["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"], ["canceled", "Canceled"]].map(([key, label]) => (
+          {[["upcoming", "Upcoming"], ["past", "Past"], ["drafts", "Drafts"], ["canceled", "Canceled"], ["deleted", "Deleted"]].map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -2253,7 +2257,9 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <button onClick={() => onOpenOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="w-full text-left">
                 <div className="flex items-start justify-between mb-1">
                   <div className="flex items-center gap-2">
-                    {ev.canceled ? (
+                    {ev.deleted ? (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.ashFaint}`, borderRadius: 2 }}>DELETED</span>
+                    ) : ev.canceled ? (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: 2 }}>CANCELED</span>
                     ) : ev.draft ? (
                       <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
@@ -2286,24 +2292,32 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                   <Copy size={12} />
                 </button>
-                {ev.draft && (
-                  <button onClick={() => setConfirmPublish(ev)} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
-                    Publish
+                {ev.deleted ? (
+                  <button onClick={() => restoreEvent(ev.id)} className="px-3 py-2 text-[12px] font-semibold flex items-center gap-1" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                    <RotateCcw size={12} /> Restore
                   </button>
+                ) : (
+                  <>
+                    {ev.draft && (
+                      <button onClick={() => setConfirmPublish(ev)} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                        Publish
+                      </button>
+                    )}
+                    {ev.canceled && (
+                      <button onClick={() => updateEvent(ev.id, { canceled: false, canceledAt: null })} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                        Reactivate
+                      </button>
+                    )}
+                    {!ev.draft && !ev.canceled && (
+                      <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                        <Ban size={14} />
+                      </button>
+                    )}
+                    <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
                 )}
-                {ev.canceled && (
-                  <button onClick={() => updateEvent(ev.id, { canceled: false, canceledAt: null })} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
-                    Reactivate
-                  </button>
-                )}
-                {!ev.draft && !ev.canceled && (
-                  <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
-                    <Ban size={14} />
-                  </button>
-                )}
-                <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
-                  <Trash2 size={14} />
-                </button>
               </div>
             </div>
           ))
@@ -2334,14 +2348,14 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Delete this event?</div>
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-              "{confirmDelete.title}" will be permanently deleted. This can't be undone.
+              "{confirmDelete.title}" will move to the Deleted tab — bookings, revenue, and waiver history stay intact, and you can restore it later if this was a mistake.
             </p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmDelete(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                 Cancel
               </button>
               <button onClick={handleConfirmDelete} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
-                {busy ? "Deleting…" : "Delete"}
+                {busy ? "Deleting…" : "Delete Event"}
               </button>
             </div>
           </div>
@@ -2373,7 +2387,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
 /* ---------- Roster hub (top-level tab — pick an event, then see who's signed) ---------- */
 function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
   const today = localDateStr();
-  const sorted = [...events].filter((e) => !e.draft).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const sorted = [...events].filter((e) => !e.draft && !e.deleted).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
@@ -2410,7 +2424,7 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
 
 /* ---------- Analytics (top-level tab, real numbers only) ---------- */
 function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoading }) {
-  const published = events.filter((e) => !e.draft);
+  const published = events.filter((e) => !e.draft && !e.deleted);
   const totalInterest = published.reduce((sum, e) => sum + (e.interestCount || 0), 0);
   const totalBooked = published.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
   const topEvents = [...published].filter((e) => e.interestCount > 0).sort((a, b) => (b.interestCount || 0) - (a.interestCount || 0)).slice(0, 5);
@@ -3199,7 +3213,7 @@ export default function App() {
   const activeField = myFields.find((f) => f.id === activeFieldId) || allFields.find((f) => f.id === activeFieldId);
   const myFieldIds = myFields.map((f) => f.id);
   const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
-  const { createEvent, updateEvent, deleteEvent, duplicateEvent, newEventId } = useOwnerEventActions();
+  const { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
   const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
@@ -3335,6 +3349,7 @@ export default function App() {
           onOpenOverview={openEventOverview}
           onOpenRoster={openRoster}
           deleteEvent={deleteEvent}
+          restoreEvent={restoreEvent}
           duplicateEvent={duplicateEvent}
           updateEvent={updateEvent}
         />
