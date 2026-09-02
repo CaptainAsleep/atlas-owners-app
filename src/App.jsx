@@ -269,7 +269,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onLogout }) {
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && !e.deleted && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.filter((e) => !e.deleted).reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -281,6 +281,15 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
     const cap = typeof e.maxCapacity === "number" ? e.maxCapacity : parseInt(e.maxCapacity, 10);
     return sum + (p && cap ? p * cap : 0);
   }, 0);
+
+  // Trial-awareness for the banner below — nobody should find out they're
+  // on a trial (or what it costs once it ends) only at the moment they
+  // get charged.
+  const trialPeriodEnd = profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate
+    ? profile.currentPeriodEnd.toDate()
+    : null;
+  const trialDaysRemaining = trialPeriodEnd ? daysLeft(trialPeriodEnd) : null;
+  const trialTier = trialPeriodEnd ? SUBSCRIPTION_TIERS.find((t) => t.key === profile.subscriptionTier) : null;
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
@@ -295,6 +304,24 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
+        {trialPeriodEnd && (
+          <button
+            onClick={onOpenBilling}
+            className="w-full mb-4 p-4 flex items-center gap-3 text-left"
+            style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}
+          >
+            <Calendar size={18} color={T.accent} />
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>
+                {trialDaysRemaining > 0 ? `${trialDaysRemaining} day${trialDaysRemaining === 1 ? "" : "s"} left in your free trial` : "Your free trial ends today"}
+              </div>
+              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>
+                You'll be charged {trialTier?.price || ""}/mo for {trialTier?.name || profile.subscriptionTier} on {trialPeriodEnd.toLocaleDateString()} unless you cancel or change plans first.
+              </div>
+            </div>
+            <ChevronRight size={16} color={T.accent} />
+          </button>
+        )}
         {myFields.length > 0 && !profile?.payoutsEnabled && (
           <button
             onClick={onOpenPayouts}
@@ -2473,6 +2500,13 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 }
 
 /* ---------- Settings ---------- */
+// Ceil rather than floor/round — someone with 6 hours left on their trial
+// should see "1 day left," not "0 days left" (which reads as "already
+// over" and undersells how much notice they actually have).
+function daysLeft(date) {
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
 const SUBSCRIPTION_TIERS = [
   { key: "starter", name: "Starter", price: "$100", desc: "For a single field running open plays every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
   { key: "pro", name: "Pro", price: "$200", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
@@ -2488,6 +2522,8 @@ const SUBSCRIPTION_TIERS = [
 function BillingScreen({ profile, onBack }) {
   const [loadingTier, setLoadingTier] = useState(null);
   const [error, setError] = useState("");
+
+  const [portalLoading, setPortalLoading] = useState(false);
 
   const handleChoosePlan = async (tier) => {
     setLoadingTier(tier);
@@ -2507,6 +2543,25 @@ function BillingScreen({ profile, onBack }) {
       console.error("createSubscriptionCheckout failed:", err);
       setError("Couldn't start checkout — try again, or reach out on Discord if it keeps happening.");
       setLoadingTier(null);
+    }
+  };
+
+  // The real cancel-or-change-plan link — Stripe's own hosted Customer
+  // Portal, same "opens in a separate tab" reasoning as checkout above.
+  // profile updates on its own once Stripe's webhook confirms whatever
+  // the owner did there (this screen never has to know which).
+  const handleOpenPortal = async () => {
+    setPortalLoading(true);
+    setError("");
+    try {
+      const createPortalSession = httpsCallable(functions, "createBillingPortalSession");
+      const result = await createPortalSession();
+      window.open(result.data.url, "_blank");
+    } catch (err) {
+      console.error("createBillingPortalSession failed:", err);
+      setError("Couldn't open billing — try again, or reach out on Discord if it keeps happening.");
+    } finally {
+      setPortalLoading(false);
     }
   };
 
@@ -2554,22 +2609,46 @@ function BillingScreen({ profile, onBack }) {
   const currentTier = SUBSCRIPTION_TIERS.find((t) => t.key === profile?.subscriptionTier);
 
   if (status === "active" || status === "trialing") {
+    const periodEnd = profile.currentPeriodEnd?.toDate ? profile.currentPeriodEnd.toDate() : null;
+    const remaining = status === "trialing" && periodEnd ? daysLeft(periodEnd) : null;
     return (
-      <div className="h-full overflow-y-auto" style={flatBg}>
+      <div className="h-full overflow-y-auto pb-24" style={flatBg}>
         {header}
         <div className="px-6 pt-6">
+          {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
           <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.good}` }}>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>{status === "trialing" ? "FREE TRIAL" : "ACTIVE"}</span>
             </div>
             <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{currentTier?.name || profile.subscriptionTier} — {currentTier?.price || ""}/mo</div>
-            {profile.currentPeriodEnd?.toDate && (
+            {periodEnd && (
               <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>
-                {status === "trialing" ? "Trial ends" : "Renews"} {profile.currentPeriodEnd.toDate().toLocaleDateString()}
+                {status === "trialing" ? "Trial ends" : "Renews"} {periodEnd.toLocaleDateString()}
+              </p>
+            )}
+            {/* The actual point of this whole screen: nobody should be
+                surprised by a real charge. Spell out exactly when it
+                happens, for how much, and on what plan, right next to the
+                button that avoids it. */}
+            {status === "trialing" && periodEnd && (
+              <p className="text-[12px] mt-3 font-medium" style={{ ...body, color: T.ash }}>
+                {remaining > 0
+                  ? `${remaining} day${remaining === 1 ? "" : "s"} left in your free trial.`
+                  : "Your free trial ends today."} You'll be charged {currentTier?.price || ""}/mo for {currentTier?.name || profile.subscriptionTier} on {periodEnd.toLocaleDateString()} unless you cancel before then.
               </p>
             )}
           </div>
-          <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>To change plans or cancel, reach out on Discord for now.</p>
+          <button
+            onClick={handleOpenPortal}
+            disabled={portalLoading}
+            className="w-full py-2.5 text-[13px] font-semibold mb-2"
+            style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4, opacity: portalLoading ? 0.6 : 1 }}
+          >
+            {portalLoading ? "Opening Stripe…" : "Manage or Cancel Plan"}
+          </button>
+          <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>
+            Opens Stripe's own billing page — change plans, update your card, or cancel outright, all directly with Stripe.
+          </p>
         </div>
       </div>
     );
@@ -2577,15 +2656,24 @@ function BillingScreen({ profile, onBack }) {
 
   if (status === "past_due" || status === "unpaid") {
     return (
-      <div className="h-full overflow-y-auto" style={flatBg}>
+      <div className="h-full overflow-y-auto pb-24" style={flatBg}>
         {header}
         <div className="px-6 pt-6">
+          {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
           <div className="p-4 mb-4" style={{ background: "rgba(188,51,39,0.08)", border: `1px solid ${T.alert}`, borderRadius: 8 }}>
             <div className="text-[14px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payment issue on your account</div>
             <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>
-              Your last payment didn't go through. Updating your card isn't self-serve here yet — reach out on Discord and we'll sort it out directly.
+              Your last payment didn't go through. Update your card or cancel below, or reach out on Discord if you'd like help directly.
             </p>
           </div>
+          <button
+            onClick={handleOpenPortal}
+            disabled={portalLoading}
+            className="w-full py-2.5 text-[13px] font-semibold"
+            style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: portalLoading ? 0.6 : 1 }}
+          >
+            {portalLoading ? "Opening Stripe…" : "Update Payment or Cancel"}
+          </button>
         </div>
       </div>
     );
@@ -2890,9 +2978,16 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           className="w-full mb-3 p-4 flex items-center justify-between"
           style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
         >
-          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
-            {profile?.comped ? "Free, permanent access" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
-          </span>
+          <div className="text-left">
+            <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>
+              {profile?.comped ? "Free, permanent access" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
+            </span>
+            {profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate && (
+              <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
+                Trial ends in {daysLeft(profile.currentPeriodEnd.toDate())} day{daysLeft(profile.currentPeriodEnd.toDate()) === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
         <button
@@ -3412,6 +3507,7 @@ export default function App() {
           onOpenField={openField}
           onOpenClaim={openClaim}
           onOpenPayouts={() => setOverlay("payouts")}
+          onOpenBilling={() => setOverlay("billing")}
           onOpenEventsList={() => setActiveTab("events")}
           onCreateEvent={() => {
             if (myFields.length > 0) openEventEdit(myFields[0], null);
