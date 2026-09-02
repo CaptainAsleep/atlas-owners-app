@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
@@ -2704,7 +2704,26 @@ function PayoutsScreen({ profile, onBack, checking }) {
             <Check size={22} color="#FFFFFF" strokeWidth={3} />
           </div>
           <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payouts active</div>
-          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Your Stripe account is set up to receive player booking payments directly.</p>
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashDim }}>Your Stripe account is set up to receive player booking payments directly.</p>
+          <button
+            onClick={() => {
+              // Standard Connect accounts have no login-link API (that's
+              // an Express-only feature) — this is a plain, static URL,
+              // not a deep link into this specific account. It opens in
+              // a new tab for the same reason as every other Stripe
+              // redirect in this app: see the WebKit viewport bug note
+              // on the Connect onboarding button above.
+              window.open("https://dashboard.stripe.com/", "_blank");
+            }}
+            className="mx-auto flex items-center gap-1.5 py-2 px-4 text-[12px] font-medium"
+            style={{ ...body, color: T.accent }}
+          >
+            <ExternalLink size={13} strokeWidth={2} />
+            View payouts on Stripe
+          </button>
+          <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>
+            Opens Stripe's own login — sign in with the email you used to set up payouts.
+          </p>
         </div>
       </div>
     );
