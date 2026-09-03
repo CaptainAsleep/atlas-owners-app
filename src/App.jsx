@@ -2803,26 +2803,41 @@ function BillingScreen({ profile, onBack }) {
   if (status === "active" || status === "trialing") {
     const periodEnd = profile.currentPeriodEnd?.toDate ? profile.currentPeriodEnd.toDate() : null;
     const remaining = status === "trialing" && periodEnd ? daysLeft(periodEnd) : null;
+    // A subscription someone already canceled through the Stripe portal
+    // stays "active" right up until the real period-end deletion event —
+    // that's the "cancel at period end" behavior our portal config uses,
+    // so they keep what they already paid for instead of losing access
+    // mid-cycle. Without calling that out here, this screen would show
+    // "ACTIVE, renews on <date>" with no sign the cancellation actually
+    // registered, which is exactly the confusion this screen exists to
+    // prevent.
+    const cancelPending = !!profile.cancelAtPeriodEnd;
     return (
       <div className="h-full overflow-y-auto pb-24" style={flatBg}>
         {header}
         <div className="px-6 pt-6">
           {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
-          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.good}` }}>
+          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${cancelPending ? T.ashFaint : T.good}` }}>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>{status === "trialing" ? "FREE TRIAL" : "ACTIVE"}</span>
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: cancelPending ? T.ashDim : T.good, border: `1px solid ${cancelPending ? T.ashDim : T.good}`, borderRadius: 2 }}>
+                {cancelPending ? "CANCELED" : status === "trialing" ? "FREE TRIAL" : "ACTIVE"}
+              </span>
             </div>
             <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{currentTier?.name || profile.subscriptionTier} — {currentTier?.price || ""}/mo</div>
             {periodEnd && (
               <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>
-                {status === "trialing" ? "Trial ends" : "Renews"} {periodEnd.toLocaleDateString()}
+                {cancelPending ? "Access ends" : status === "trialing" ? "Trial ends" : "Renews"} {periodEnd.toLocaleDateString()}
               </p>
             )}
             {/* The actual point of this whole screen: nobody should be
                 surprised by a real charge. Spell out exactly when it
                 happens, for how much, and on what plan, right next to the
                 button that avoids it. */}
-            {status === "trialing" && periodEnd && (
+            {cancelPending && periodEnd ? (
+              <p className="text-[12px] mt-3 font-medium" style={{ ...body, color: T.ash }}>
+                Your plan is canceled — you'll keep {currentTier?.name || profile.subscriptionTier} until {periodEnd.toLocaleDateString()}, and you won't be charged again after that.
+              </p>
+            ) : status === "trialing" && periodEnd && (
               <p className="text-[12px] mt-3 font-medium" style={{ ...body, color: T.ash }}>
                 {remaining > 0
                   ? `${remaining} day${remaining === 1 ? "" : "s"} left in your free trial.`
@@ -2836,10 +2851,12 @@ function BillingScreen({ profile, onBack }) {
             className="w-full py-2.5 text-[13px] font-semibold mb-2"
             style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4, opacity: portalLoading ? 0.6 : 1 }}
           >
-            {portalLoading ? "Opening Stripe…" : "Manage or Cancel Plan"}
+            {portalLoading ? "Opening Stripe…" : cancelPending ? "Manage Billing" : "Manage or Cancel Plan"}
           </button>
           <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>
-            Opens Stripe's own billing page — change plans, update your card, or cancel outright, all directly with Stripe.
+            {cancelPending
+              ? "Changed your mind? Stripe's billing page lets you resume your plan before it actually ends."
+              : "Opens Stripe's own billing page — change plans, update your card, or cancel outright, all directly with Stripe."}
           </p>
         </div>
       </div>
@@ -3172,9 +3189,13 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         >
           <div className="text-left">
             <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>
-              {profile?.comped ? "Free, permanent access" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
+              {profile?.comped ? "Free, permanent access" : profile?.cancelAtPeriodEnd ? "Plan canceled" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
             </span>
-            {profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate && (
+            {profile?.cancelAtPeriodEnd && profile.currentPeriodEnd?.toDate ? (
+              <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
+                Access ends {profile.currentPeriodEnd.toDate().toLocaleDateString()}
+              </span>
+            ) : profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate && (
               <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
                 Trial ends in {daysLeft(profile.currentPeriodEnd.toDate())} day{daysLeft(profile.currentPeriodEnd.toDate()) === 1 ? "" : "s"}
               </span>
