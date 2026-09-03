@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink, PartyPopper,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./legalText";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
-import { useOwnerEvents, useOwnerEventActions } from "./hooks/useOwnerEvents";
+import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useOwnerBookingRevenue, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { db, storage, functions } from "./lib/firebase";
@@ -1167,7 +1167,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         </div>
         <div className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{ev.title}</div>
         <div className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
-          {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
+          {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}{ev.endTime ? ` – ${ev.endTime}` : ""}
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
@@ -1240,6 +1240,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [date, setDate] = useState(existing?.date || "");
   const [endDate, setEndDate] = useState(existing?.endDate || "");
   const [startTime, setStartTime] = useState(existing?.startTime || "");
+  const [endTime, setEndTime] = useState(existing?.endTime || "");
   const [briefingTime, setBriefingTime] = useState(existing?.briefingTime || "");
   const [price, setPrice] = useState(existing?.price || "$");
   const [maxCapacity, setMaxCapacity] = useState(existing?.maxCapacity || "");
@@ -1260,12 +1261,12 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   // nothing to compare against, so it's always considered "changed."
   const [snapshot, setSnapshot] = useState({
     title: existing?.title || "", date: existing?.date || "", endDate: existing?.endDate || "",
-    startTime: existing?.startTime || "", briefingTime: existing?.briefingTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
+    startTime: existing?.startTime || "", endTime: existing?.endTime || "", briefingTime: existing?.briefingTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
     type: existing?.type || "OUTDOOR", description: existing?.description || "", imageUrl: existing?.imageUrl || null,
   });
   const hasChanges = !existing ||
     title !== snapshot.title || date !== snapshot.date || endDate !== snapshot.endDate ||
-    startTime !== snapshot.startTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
+    startTime !== snapshot.startTime || endTime !== snapshot.endTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     waiverText !== (existing?.waiver?.text || "") ||
     patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null);
@@ -1362,6 +1363,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     date,
     endDate: endDate || null,
     startTime: startTime || null,
+    endTime: endTime || null,
     briefingTime: briefingTime || null,
     price: price || null,
     maxCapacity: maxCapacity ? parseInt(maxCapacity, 10) : null,
@@ -1463,7 +1465,14 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           </div>
         )}
 
-        <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
+          </div>
+          <div className="flex-1">
+            <TextField label="End Time (optional)" value={endTime} onChange={setEndTime} placeholder="e.g. 5:00 PM" />
+          </div>
+        </div>
 
         <div className="mb-3">
           <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Safety Briefing Time (optional)</label>
@@ -2393,7 +2402,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                   {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
                 </div>
                 <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
-                  {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}
+                  {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}{ev.endTime ? ` – ${ev.endTime}` : ""}
                 </div>
                 {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
                   <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
@@ -3319,6 +3328,93 @@ function InstallGateScreen({ platform, deferredPrompt }) {
   );
 }
 
+// Turns a Stripe Connect account's payouts.schedule object into a plain
+// sentence fragment for the post-event payout celebration ("Payouts are
+// ___."). No schedule cached yet (owner never triggered a checkPayoutsStatus
+// refresh, or it's genuinely null) falls back to Stripe's own general
+// default rather than guessing a specific cadence that might be wrong.
+function formatPayoutSchedule(schedule) {
+  if (!schedule || !schedule.interval) {
+    return "on Stripe's standard schedule (typically every couple of business days) — check your Stripe dashboard for your exact timing";
+  }
+  const delay = typeof schedule.delay_days === "number" ? schedule.delay_days : null;
+  const delayPhrase = delay ? ` — expect it in your bank within about ${delay} business day${delay === 1 ? "" : "s"} after that` : "";
+  if (schedule.interval === "manual") {
+    return "released manually by Atlas — reach out on Discord if you're ever unsure when to expect it";
+  }
+  if (schedule.interval === "daily") {
+    return `sent out daily${delayPhrase}`;
+  }
+  if (schedule.interval === "weekly") {
+    const day = schedule.weekly_anchor ? schedule.weekly_anchor.charAt(0).toUpperCase() + schedule.weekly_anchor.slice(1) : "the same day each week";
+    return `sent out every ${day}${delayPhrase}`;
+  }
+  if (schedule.interval === "monthly") {
+    const anchor = typeof schedule.monthly_anchor === "number" ? schedule.monthly_anchor : null;
+    return `sent out on day ${anchor || "\u2014"} of each month${delayPhrase}`;
+  }
+  return "on Stripe's standard schedule — check your Stripe dashboard for your exact timing";
+}
+
+// The one-time "congrats on a successful event" popup — surfaced by
+// usePayoutCelebration once per real (paid) event, the next time the
+// owner logs in after it wraps up. Deliberately no dismiss-by-tapping-the-
+// scrim here, unlike the confirm dialogs elsewhere in this file — this is
+// the owner's actual payout amount, not a routine yes/no, so it only goes
+// away once they've explicitly acknowledged it.
+function PayoutCelebrationModal({ event, revenueCents, payoutSchedule, onDismiss }) {
+  const [dismissing, setDismissing] = useState(false);
+
+  const handleDismiss = async () => {
+    setDismissing(true);
+    try {
+      await onDismiss();
+    } finally {
+      setDismissing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2100 }}>
+      <div className="w-full p-6" style={{ background: T.panel, borderRadius: 10, maxWidth: 380 }}>
+        <div className="w-11 h-11 mb-3 flex items-center justify-center" style={{ background: "rgba(15,122,82,0.12)", borderRadius: 999 }}>
+          <PartyPopper size={22} color={T.good} />
+        </div>
+        <div className="text-[17px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Congrats on a successful event!</div>
+        <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+          "{event.title}" at {event.fieldName} wrapped up on {event.endDate || event.date}.
+        </p>
+
+        <div className="p-4 mb-4 text-center" style={{ background: T.panelAlt, borderRadius: 8, border: `1px solid ${T.line}` }}>
+          <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>You'll receive</div>
+          <div className="text-[28px] font-semibold" style={{ ...display, color: T.good }}>${(revenueCents / 100).toFixed(2)}</div>
+        </div>
+
+        <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+          Payouts are {formatPayoutSchedule(payoutSchedule)}.
+        </p>
+
+        <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>
+          If you have any feedback or experienced any bugs during this event, feel free to reach out to us on{" "}
+          <a href="https://discord.gg/hR8EntGsq" target="_blank" rel="noopener noreferrer" style={{ color: T.accent, fontWeight: 600, textDecoration: "none" }}>
+            our Discord
+          </a>
+          .
+        </p>
+
+        <button
+          onClick={handleDismiss}
+          disabled={dismissing}
+          className="w-full py-2.5 text-[13px] font-semibold"
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: dismissing ? 0.6 : 1 }}
+        >
+          {dismissing ? "\u2026" : "Nice!"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- App shell ---------- */
 export default function App() {
   // Sets the real, trustworthy height — but not from window.screen.height
@@ -3402,7 +3498,13 @@ export default function App() {
   // land back on.
   const [checkingPayouts, setCheckingPayouts] = useState(false);
   useEffect(() => {
-    if (!profile?.stripeConnectAccountId || profile?.payoutsEnabled) return;
+    // Keeps checking until payouts are enabled AND a payout schedule is
+    // cached — not just the former. Otherwise an owner whose payouts were
+    // already enabled before payoutSchedule existed would never get one
+    // backfilled (this effect would just never fire for them again), and
+    // the post-event payout celebration would have no real schedule to
+    // show.
+    if (!profile?.stripeConnectAccountId || (profile?.payoutsEnabled && profile?.payoutSchedule)) return;
     const handleVisibility = async () => {
       if (document.visibilityState !== "visible") return;
       setCheckingPayouts(true);
@@ -3417,7 +3519,7 @@ export default function App() {
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [profile?.stripeConnectAccountId, profile?.payoutsEnabled]);
+  }, [profile?.stripeConnectAccountId, profile?.payoutsEnabled, profile?.payoutSchedule]);
 
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
@@ -3434,6 +3536,7 @@ export default function App() {
   const myFieldIds = myFields.map((f) => f.id);
   const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
   const { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
+  const { celebrationEvent, celebrationRevenueCents, dismissCelebration } = usePayoutCelebration(allMyEvents);
   const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
@@ -3462,6 +3565,16 @@ export default function App() {
   if (authLoading) {
     return <LoadingScreen />;
   }
+
+  // Whether the owner is logged in, past the legal-agreement screen, and
+  // past the billing hard-gate — the payout celebration popup only makes
+  // sense once someone's actually looking at their real dashboard, not
+  // stacked on top of "accept our terms" or "pick a plan."
+  const pastOnboardingGates =
+    !!user &&
+    !!profile &&
+    profile.acceptedTermsVersion === CURRENT_TERMS_VERSION &&
+    !(myFields.length > 0 && !profile.comped && profile.subscriptionStatus !== "active" && profile.subscriptionStatus !== "trialing");
 
   let content;
   let showNav = false;
@@ -3637,6 +3750,14 @@ export default function App() {
       <div className="flex-1 min-h-0 relative">
         {content}
         {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
+        {pastOnboardingGates && celebrationEvent && (
+          <PayoutCelebrationModal
+            event={celebrationEvent}
+            revenueCents={celebrationRevenueCents}
+            payoutSchedule={profile?.payoutSchedule}
+            onDismiss={dismissCelebration}
+          />
+        )}
       </div>
     </div>
   );

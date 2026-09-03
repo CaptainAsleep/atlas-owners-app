@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Every event across this owner's claimed field(s) — if they own more than
@@ -89,4 +89,106 @@ export function useOwnerEventActions() {
   }
 
   return { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId };
+}
+
+// Finds the owner's oldest finished-but-not-yet-celebrated event that
+// actually had real money change hands, and computes what they'll receive
+// from Atlas for it — the data behind the one-time "congrats on a
+// successful event" popup shown on next login. Deliberately surfaces one
+// event at a time (oldest first) rather than dumping a pile of past
+// events on someone who hasn't logged in for a while; dismissing marks
+// that event's payoutNoticeShown so it never resurfaces, and whatever's
+// next in line takes its place automatically on the next render.
+export function usePayoutCelebration(events) {
+  const [candidateId, setCandidateId] = useState(null);
+  const [revenueCents, setRevenueCents] = useState(0);
+  const [checking, setChecking] = useState(false);
+  // Belt-and-suspenders against the live Firestore listener's write not
+  // having round-tripped back into `events` yet the instant dismiss()
+  // fires — without this, the same just-dismissed event could get picked
+  // again as "next candidate" for one render before payoutNoticeShown
+  // actually shows up on its doc.
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
+
+  // Today, UTC-based date string — same convention already used
+  // elsewhere in this app (e.g. FieldOverviewScreen) for "is this event
+  // in the past" comparisons.
+  const today = new Date().toISOString().slice(0, 10);
+
+  const candidates = events
+    .filter(
+      (e) =>
+        !e.draft &&
+        !e.deleted &&
+        !e.canceled &&
+        !e.payoutNoticeShown &&
+        !dismissedIds.has(e.id) &&
+        (e.endDate || e.date) &&
+        (e.endDate || e.date) < today
+    )
+    .sort((a, b) => (a.endDate || a.date).localeCompare(b.endDate || b.date));
+  const candidatesKey = candidates.map((e) => e.id).join(",");
+
+  useEffect(() => {
+    if (candidateId || candidates.length === 0) return;
+    const next = candidates[0];
+    let cancelled = false;
+    setChecking(true);
+    getDocs(collection(db, "events", next.id, "bookings"))
+      .then((snap) => {
+        if (cancelled) return;
+        // Same formula as useOwnerBookingRevenue — the owner's own share
+        // of each paid booking (full price minus Atlas's booking fee).
+        let cents = 0;
+        snap.docs.forEach((d) => {
+          const b = d.data();
+          if (!b.paid || typeof b.amountPaidCents !== "number") return;
+          cents += b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0);
+        });
+        if (cents > 0) {
+          setCandidateId(next.id);
+          setRevenueCents(cents);
+        } else {
+          // Nothing was actually paid for this one (a free event, or
+          // nobody booked) — silently mark it handled instead of showing
+          // an anticlimactic "$0.00, congrats!" popup. Also added to
+          // dismissedIds immediately, same as the real dismiss path below —
+          // otherwise this same zero-revenue event could get re-picked as
+          // "next candidate" on the next render, before the Firestore
+          // listener's update round-trips back into `events`.
+          setDismissedIds((prev) => new Set(prev).add(next.id));
+          updateDoc(doc(db, "events", next.id), { payoutNoticeShown: true }).catch(() => {});
+        }
+      })
+      .catch((err) => console.error("usePayoutCelebration revenue check failed:", err))
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidatesKey, candidateId]);
+
+  const celebrationEvent = candidateId ? events.find((e) => e.id === candidateId) || null : null;
+
+  async function dismissCelebration() {
+    if (!candidateId) return;
+    const id = candidateId;
+    setDismissedIds((prev) => new Set(prev).add(id));
+    setCandidateId(null);
+    setRevenueCents(0);
+    try {
+      await updateDoc(doc(db, "events", id), { payoutNoticeShown: true });
+    } catch (err) {
+      console.error("usePayoutCelebration dismiss failed:", err);
+    }
+  }
+
+  return {
+    celebrationEvent,
+    celebrationRevenueCents: revenueCents,
+    celebrationChecking: checking,
+    dismissCelebration,
+  };
 }
