@@ -369,7 +369,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                   <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</span>
                 </div>
                 <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
-                <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Players who favorited your events — not confirmed bookings</div>
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Players who favorited your events — not confirmed reservations</div>
               </div>
             </div>
 
@@ -405,7 +405,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                   </div>
                   <div className="text-right">
                     {typeof ev.maxCapacity === "number" && (
-                      <div className="text-[12px] font-semibold" style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</div>
+                      <div className="text-[12px] font-semibold" style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} reserved</div>
                     )}
                     {ev.interestCount > 0 && (
                       <span className="text-[10px]" style={{ ...mono, color: T.ashFaint }}>{ev.interestCount} interested</span>
@@ -710,7 +710,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
           </div>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
-            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Booked</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
           </div>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
@@ -1250,7 +1250,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         <div className="grid grid-cols-3 gap-2 mb-5">
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{ev.bookedCount || 0}{typeof ev.maxCapacity === "number" ? `/${ev.maxCapacity}` : ""}</div>
-            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Booked</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
           </div>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.interestCount || 0}</div>
@@ -1936,7 +1936,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
     // exists here for anyone who signed a waiver, just not previously
     // connected to the callsign visually. Shows whichever of the two
     // wasn't already passed in as the primary name, so this works the
-    // same way in both the Booked Players section (callsign primary) and
+    // same way in both the Reserved Players section (callsign primary) and
     // the Waiver Signatures section (real name primary) without needing
     // two different versions of this function.
     const matchingSignature = signatures.find((s) => s.uid === uid);
@@ -2005,7 +2005,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <div className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
             <div className="flex items-baseline justify-between mb-1.5">
               <span className="text-[20px] font-semibold" style={{ ...display, color: T.good }}>{event.bookedCount || 0}</span>
-              <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} booked</span>
+              <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} reserved</span>
             </div>
             <div style={{ height: 6, background: T.panelAlt, borderRadius: 999, overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${Math.min(100, ((event.bookedCount || 0) / event.maxCapacity) * 100)}%`, background: T.good }} />
@@ -2021,12 +2021,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         )}
 
         <div className="flex items-center justify-between mb-1">
-          <Eyebrow>Booked Players ({bookings.length})</Eyebrow>
+          <Eyebrow>Reserved Players ({bookings.length})</Eyebrow>
           {bookings.length > 0 && (
             <button
               onClick={() => downloadCsv(
-                `${event.title} - Booked Players.csv`,
-                ["Callsign", "Booked At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
+                `${event.title} - Reserved Players.csv`,
+                ["Callsign", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
@@ -2047,7 +2047,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         {bookingsLoading ? (
           <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
         ) : bookings.length === 0 ? (
-          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
+          <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No one's reserved yet.</p>
         ) : (
           <>
             {(() => {
@@ -2074,7 +2074,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                     <input
                       value={rosterSearch}
                       onChange={(e) => setRosterSearch(e.target.value)}
-                      placeholder="Search booked players"
+                      placeholder="Search reserved players"
                       className="w-full pl-8 pr-3 py-2 text-[12px] bg-transparent outline-none"
                       style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, boxSizing: "border-box" }}
                     />
@@ -2131,7 +2131,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         </div>
         <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
           Everyone who's signed the waiver, including anyone who signed without booking. Every booking above already
-          required a signature, so this list will always be a superset of Booked Players.
+          required a signature, so this list will always be a superset of Reserved Players.
         </p>
         {signaturesLoading ? (
           <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
@@ -2238,7 +2238,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search booked players by name"
+              placeholder="Search reserved players by name"
               autoFocus
               className="w-full pl-9 pr-3 py-2.5 text-[13px] bg-transparent outline-none"
               style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash, boxSizing: "border-box" }}
@@ -2248,9 +2248,9 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
 
         <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-5">
           {bookings.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No one's booked yet.</p>
+            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No one's reserved yet.</p>
           ) : matches.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No booked player matches that name.</p>
+            <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No reserved player matches that name.</p>
           ) : (
             matches.map((b) => (
               <div key={b.uid} className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
@@ -2484,7 +2484,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
                   <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
                     {typeof ev.maxCapacity === "number" && (
-                      <span style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} booked</span>
+                      <span style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} reserved</span>
                     )}
                     {ev.interestCount > 0 && <span style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</span>}
                   </div>
@@ -2537,7 +2537,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Cancel this event?</div>
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-              "{confirmCancel.title}" will be marked canceled — anyone who booked or favorited it will see that. This keeps the real record, unlike delete, and can be reversed by editing the event again.
+              "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. This keeps the real record, unlike delete, and can be reversed by editing the event again.
             </p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
@@ -2601,7 +2601,7 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4">
         <div className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Roster</div>
-        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Pick an event to see who's booked and who's signed the waiver.</p>
+        <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Pick an event to see who's reserved and who's signed the waiver.</p>
       </div>
 
       <div className="px-6">
@@ -2662,7 +2662,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : published.length}</div>
           </div>
           <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Booked</div>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Reserved</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
           </div>
           <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
@@ -3023,7 +3023,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
             <p className="text-[11px] mb-2" style={{ ...body, color: T.accent }}>Checking your status with Stripe…</p>
           )}
           <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>
-            When players book your events, their payment goes to you directly — Atlas only takes its own booking fee, never a cut of your entry price.
+            When players reserve your events, their payment goes to you directly — Atlas only takes its own booking fee, never a cut of your entry price.
             You'll enter your bank details on Stripe's own secure page, not here — Atlas never sees or stores that information.
           </p>
           <p className="text-[11px] mb-4" style={{ ...body, color: T.ashFaint }}>
