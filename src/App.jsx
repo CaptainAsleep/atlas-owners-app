@@ -3492,6 +3492,65 @@ function PayoutCelebrationModal({ event, revenueCents, payoutSchedule, onDismiss
   );
 }
 
+const WELCOME_KEYFRAMES = `
+@keyframes welcomePop {
+  0% { transform: scale(0.3); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes welcomeGlow {
+  0%, 100% { filter: drop-shadow(0 0 24px rgba(255,255,255,0.3)); }
+  50% { filter: drop-shadow(0 0 44px rgba(255,255,255,0.55)); }
+}
+@keyframes welcomeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+`;
+
+// Shown once, right after an owner claims a field, before they land on
+// that field's dashboard — same immersive full-bleed treatment as the
+// player app's patch-unlock moment (same brand blue, #002C48 = T.ash)
+// so the two apps feel like one product even though this is a separate
+// codebase. Purely a UI beat: nothing is persisted, so it only ever
+// appears in the instant right after a successful claim, never again
+// on a later login for that same field.
+function ClaimWelcomeScreen({ fieldName, onContinue }) {
+  return (
+    <div
+      className="fixed inset-0 flex flex-col items-center justify-center px-8"
+      style={{ background: "rgba(0,44,72,0.97)", zIndex: 3000, animation: "welcomeIn 0.3s ease-out" }}
+    >
+      <style>{WELCOME_KEYFRAMES}</style>
+
+      <div className="relative mb-7" style={{ animation: "welcomeGlow 2.4s ease-in-out infinite" }}>
+        <div style={{ position: "absolute", inset: -40, background: "radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%)", borderRadius: "50%" }} />
+        <div
+          className="overflow-hidden"
+          style={{ width: 110, height: 110, borderRadius: 16, position: "relative", animation: "welcomePop 0.55s cubic-bezier(0.34,1.56,0.64,1)" }}
+        >
+          <img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="Atlas" className="w-full h-full" style={{ objectFit: "cover" }} />
+        </div>
+      </div>
+
+      <div className="text-[24px] font-bold text-center px-2 mb-2" style={{ ...display, color: "#FFFFFF", lineHeight: 1.3 }}>
+        Welcome to Atlas, {fieldName}!
+      </div>
+      <div className="text-[14px] text-center mb-9 px-6" style={{ ...body, color: "rgba(255,255,255,0.75)" }}>
+        Your field is live. Let's get your events, waivers, and payouts set up.
+      </div>
+
+      <button
+        onClick={onContinue}
+        className="px-9 py-3.5 font-semibold text-[14px] transition-transform duration-100 active:scale-95"
+        style={{ ...display, background: "#FFFFFF", color: T.ash, borderRadius: 999 }}
+      >
+        Let's get started
+      </button>
+    </div>
+  );
+}
+
 /* ---------- App shell ---------- */
 export default function App() {
   // Sets the real, trustworthy height — but not from window.screen.height
@@ -3685,13 +3744,20 @@ export default function App() {
         claimField={claimField}
         requestClaimCode={requestClaimCode}
         verifyWebsiteClaim={verifyWebsiteClaim}
-        onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); }}
+        onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("claimWelcome"); }}
       />
     );
   } else if (overlay === "billing") {
     content = <BillingScreen profile={profile} onBack={closeOverlay} />;
   } else if (overlay === "payouts") {
     content = <PayoutsScreen profile={profile} onBack={closeOverlay} checking={checkingPayouts} />;
+  } else if (overlay === "claimWelcome" && activeField) {
+    content = (
+      <ClaimWelcomeScreen
+        fieldName={activeField.name}
+        onContinue={() => setOverlay("field")}
+      />
+    );
   } else if (overlay === "field" && activeField) {
     content = (
       <FieldOverviewScreen
