@@ -207,3 +207,45 @@ export function useBanActions() {
   }
   return { banPlayer, unbanPlayer };
 }
+
+// A field's private shipping/mailing address — separate from the field's
+// public address (name/address/city/phone/etc. on the fields/{id} doc
+// itself, which the player app reads and is fully public). Some fields are
+// unstaffed, so the address someone should actually mail a welcome package
+// (stickers, tablet stand) to is often different from the field's own
+// public listing address, and it should never be world-readable the way
+// the rest of the field profile is. Lives at fields/{id}/private/shipping,
+// enforced private in firestore.rules (owner + isAdmin() only).
+export function useFieldShippingAddress(fieldId) {
+  const [address, setAddress] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!fieldId) {
+      setAddress(null);
+      setLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, "fields", fieldId, "private", "shipping"),
+      (snap) => {
+        setAddress(snap.exists() ? snap.data() : null);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("useFieldShippingAddress error:", err);
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [fieldId]);
+
+  return { shippingAddress: address, shippingAddressLoading: loading };
+}
+
+export function useShippingAddressActions() {
+  async function saveShippingAddress(fieldId, data) {
+    await setDoc(doc(db, "fields", fieldId, "private", "shipping"), data, { merge: true });
+  }
+  return { saveShippingAddress };
+}

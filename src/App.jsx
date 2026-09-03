@@ -7,7 +7,7 @@ import {
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./legalText";
-import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions } from "./hooks/useOwnerFields";
+import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useOwnerBookingRevenue, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
@@ -803,6 +803,46 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [chronoDmr, setChronoDmr] = useState(field.chrono?.dmr || "");
   const [rentals, setRentals] = useState(field.rentals || []);
   const [savedWaivers, setSavedWaivers] = useState(field.savedWaivers || []);
+
+  // Private shipping/mailing address — loaded separately (a different,
+  // non-public doc) and hydrated into local state once, the first time it
+  // loads. Not folded into the field.* defaults above like everything else
+  // on this screen, since it isn't part of the field prop at all.
+  const { shippingAddress, shippingAddressLoading } = useFieldShippingAddress(field.id);
+  const { saveShippingAddress } = useShippingAddressActions();
+  const [shipHydrated, setShipHydrated] = useState(false);
+  const [shipRecipient, setShipRecipient] = useState("");
+  const [shipLine1, setShipLine1] = useState("");
+  const [shipLine2, setShipLine2] = useState("");
+  const [shipCity, setShipCity] = useState("");
+  const [shipState, setShipState] = useState("");
+  const [shipZip, setShipZip] = useState("");
+  const [shipNotes, setShipNotes] = useState("");
+
+  useEffect(() => {
+    if (shippingAddressLoading || shipHydrated) return;
+    const a = shippingAddress || {};
+    setShipRecipient(a.recipientName || "");
+    setShipLine1(a.line1 || "");
+    setShipLine2(a.line2 || "");
+    setShipCity(a.city || "");
+    setShipState(a.state || "");
+    setShipZip(a.zip || "");
+    setShipNotes(a.notes || "");
+    setShipHydrated(true);
+    // Also backfills the snapshot below with the real loaded values, once
+    // — otherwise hasChanges would spuriously flip true the instant this
+    // async load lands (local state moving from "" to a real value, with
+    // nothing in snapshot yet to match it), even though the owner hasn't
+    // touched anything.
+    setSnapshot((prev) => ({
+      ...prev,
+      shipRecipient: a.recipientName || "", shipLine1: a.line1 || "", shipLine2: a.line2 || "",
+      shipCity: a.city || "", shipState: a.state || "", shipZip: a.zip || "", shipNotes: a.notes || "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shippingAddressLoading, shipHydrated]);
+
   const [gallery, setGallery] = useState(field.galleryPhotos || []);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const galleryInputRef = React.useRef(null);
@@ -821,6 +861,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
     chronoSniper: field.chrono?.sniper || "", chronoDmr: field.chrono?.dmr || "", rentals: field.rentals || [],
     savedWaivers: field.savedWaivers || [],
+    shipRecipient: "", shipLine1: "", shipLine2: "", shipCity: "", shipState: "", shipZip: "", shipNotes: "",
   });
   const hasChanges =
     imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
@@ -831,7 +872,9 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     rulesText !== snapshot.rulesText || chronoAeg !== snapshot.chronoAeg ||
     chronoSniper !== snapshot.chronoSniper || chronoDmr !== snapshot.chronoDmr ||
     JSON.stringify(rentals) !== JSON.stringify(snapshot.rentals) ||
-    JSON.stringify(savedWaivers) !== JSON.stringify(snapshot.savedWaivers);
+    JSON.stringify(savedWaivers) !== JSON.stringify(snapshot.savedWaivers) ||
+    shipRecipient !== snapshot.shipRecipient || shipLine1 !== snapshot.shipLine1 || shipLine2 !== snapshot.shipLine2 ||
+    shipCity !== snapshot.shipCity || shipState !== snapshot.shipState || shipZip !== snapshot.shipZip || shipNotes !== snapshot.shipNotes;
 
   const toggleAmenity = (a) => {
     setAmenities(amenities.includes(a) ? amenities.filter((x) => x !== a) : [...amenities, a]);
@@ -930,7 +973,21 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         hours: null,
         savedWaivers: savedWaivers.filter((w) => w.name.trim() && w.text.trim()),
       });
-      setSnapshot({ imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers });
+      // Separate write, separate (private) document — never goes anywhere
+      // near the public fields/{id} doc above.
+      await saveShippingAddress(field.id, {
+        recipientName: shipRecipient.trim(),
+        line1: shipLine1.trim(),
+        line2: shipLine2.trim(),
+        city: shipCity.trim(),
+        state: shipState.trim(),
+        zip: shipZip.trim(),
+        notes: shipNotes.trim(),
+      });
+      setSnapshot({
+        imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers,
+        shipRecipient, shipLine1, shipLine2, shipCity, shipState, shipZip, shipNotes,
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -1120,6 +1177,26 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
               className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, resize: "none" }} />
           </div>
         ))}
+
+        <Eyebrow>Shipping Address</Eyebrow>
+        <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Where should we send your welcome package (stickers, a tablet stand, etc.)? This can be different from your field's public address above — handy for fields where no one's usually on-site to receive mail. Private: only you and the Atlas team can see this, it's never shown to players.
+        </p>
+        <TextField label="Recipient Name (optional)" value={shipRecipient} onChange={setShipRecipient} placeholder="Who should it be addressed to?" />
+        <TextField label="Address Line 1" value={shipLine1} onChange={setShipLine1} placeholder="Street address or PO Box" />
+        <TextField label="Address Line 2 (optional)" value={shipLine2} onChange={setShipLine2} placeholder="Apt, suite, unit, etc." />
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <TextField label="City" value={shipCity} onChange={setShipCity} />
+          </div>
+          <div style={{ width: 84 }}>
+            <TextField label="State" value={shipState} onChange={setShipState} placeholder="MI" />
+          </div>
+          <div style={{ width: 110 }}>
+            <TextField label="ZIP" value={shipZip} onChange={setShipZip} />
+          </div>
+        </div>
+        <TextField label="Delivery Notes (optional)" value={shipNotes} onChange={setShipNotes} placeholder="Gate code, best drop-off spot, etc." rows={2} />
 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
         {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved — live on the player app now.</p>}
