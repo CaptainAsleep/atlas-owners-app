@@ -1012,11 +1012,13 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         <button
           onClick={handleBannerPick}
           disabled={bannerUploading}
-          className="w-full h-32 mb-5 flex flex-col items-center justify-center gap-1 overflow-hidden"
+          className="w-full h-44 mb-5 flex flex-col items-center justify-center gap-1 overflow-hidden"
           style={{ background: T.panelAlt, border: `1px dashed ${T.line}`, borderRadius: 6 }}
         >
           {imageUrl ? (
-            <img src={imageUrl} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+            // contain (not cover) so the owner always sees the whole banner here —
+            // a cropped preview made it look like the upload was getting cut off.
+            <img src={imageUrl} alt="" className="w-full h-full" style={{ objectFit: "contain" }} />
           ) : (
             <>
               <ImageIcon size={20} color={T.ashDim} />
