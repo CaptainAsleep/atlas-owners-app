@@ -1288,6 +1288,27 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           </div>
         </div>
 
+        {ev.priceOptions?.choices?.length > 0 && (
+          // The "see Price Options above" note in the Projected Revenue
+          // card below refers to this block — it used to point at nothing,
+          // since the overview screen never actually rendered the choices
+          // an owner set up in the event editor.
+          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>
+              Price Options{ev.priceOptions.required ? "" : " (Optional)"}
+            </div>
+            <div className="text-[12px] font-medium mb-2" style={{ ...body, color: T.ash }}>{ev.priceOptions.label}</div>
+            <div className="flex flex-col gap-1.5">
+              {ev.priceOptions.choices.map((c) => (
+                <div key={c.id} className="flex items-center justify-between text-[12px]" style={{ ...body, color: T.ashDim }}>
+                  <span>{c.label}</span>
+                  <span style={{ ...mono, color: T.accent, fontWeight: 600 }}>{c.priceCents ? `+$${(c.priceCents / 100).toFixed(2)}` : "Free"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {(() => {
           // Price Options means the real per-player cost isn't one flat
           // number — a price × capacity estimate would just be wrong (or
