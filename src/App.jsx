@@ -165,7 +165,16 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
   // actually shrinks what the browser draws, not just what CSS allows.
   const isDateOrTime = type === "date" || type === "time";
   return (
-    <div className="mb-3">
+    // min-w-0 matters whenever this div lands directly inside a flex
+    // container (e.g. the Date/End Date column below): a flex item's
+    // default min-width is "auto", which for a native date/time input
+    // resolves to its own intrinsic rendered width. Without min-w-0 the
+    // box won't actually shrink/stretch to its assigned size — it holds
+    // its intrinsic width instead and bleeds out one side (same bug as
+    // the Start/End Time row, just on the cross axis of a column flex
+    // instead of the main axis of a row flex). Harmless outside a flex
+    // context.
+    <div className="mb-3 min-w-0">
       {label && <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>{label}</label>}
       <Tag
         value={value}
@@ -1589,7 +1598,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         <TextField label="Event Name" value={title} onChange={setTitle} placeholder="e.g. Saturday Woods CQB Classic" />
         <div className="flex flex-col gap-2 mb-3">
           <TextField label="Date" value={date} onChange={setDate} type="date" />
-          <div>
+          <div className="min-w-0">
             <TextField label="End Date (optional)" value={endDate} onChange={setEndDate} type="date" />
             <p className="text-[10px] -mt-2" style={{ ...body, color: T.ashFaint }}>Leave blank for a single-day event.</p>
           </div>
@@ -1607,11 +1616,18 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           </div>
         )}
 
+        {/* min-w-0 on both flex children is load-bearing: a flex item's
+            default min-width is "auto", which for a native time/date
+            control resolves to its own intrinsic rendered width (iOS's
+            time widget needs room for hour:minute + AM/PM). Without
+            min-w-0, neither box will actually shrink to its 50% share —
+            they hold their intrinsic width instead, eating the gap and
+            touching (or overlapping) each other. */}
         <div className="flex gap-2">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <TextField label="Start Time" value={startTime} onChange={setStartTime} type="time" />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <TextField label="End Time (optional)" value={endTime} onChange={setEndTime} type="time" />
           </div>
         </div>
