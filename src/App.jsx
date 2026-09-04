@@ -199,6 +199,15 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
           minWidth: 0,
           maxWidth: "100%",
           display: "block",
+          // The font-size/min-width tricks above weren't enough on their
+          // own — iOS Safari lays out a native date/time control's
+          // segments using its own intrinsic sizing and can render past
+          // whatever width we declare, regardless of box-sizing. Turning
+          // off native appearance stops WebKit from using that special
+          // layout path, so the control finally respects width like a
+          // normal box; the tap-to-open native picker still works the
+          // same either way, only the inline chrome's sizing changes.
+          ...(isDateOrTime ? { WebkitAppearance: "none", appearance: "none" } : {}),
         }}
       />
     </div>
