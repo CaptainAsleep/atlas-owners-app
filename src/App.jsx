@@ -2118,7 +2118,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Reserved Players.csv`,
-                ["Callsign", "Selected Option", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
+                ["Callsign", "Selected Option", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Refund Status", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
                   b.selectedChoiceLabel || "",
@@ -2127,6 +2127,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                   b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
                   b.paid ? "Yes" : "No",
                   typeof b.amountPaidCents === "number" ? `$${(b.amountPaidCents / 100).toFixed(2)}` : "",
+                  b.refundStatus || "",
                   b.stripeCheckoutSessionId || "",
                 ])
               )}
