@@ -207,7 +207,14 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
           // layout path, so the control finally respects width like a
           // normal box; the tap-to-open native picker still works the
           // same either way, only the inline chrome's sizing changes.
-          ...(isDateOrTime ? { WebkitAppearance: "none", appearance: "none" } : {}),
+          //
+          // Side effect: native appearance was also what enforced a
+          // touch-friendly minimum height — without it the box collapses
+          // to just padding + line-height, visibly shorter than every
+          // other field. An explicit height restores that (a plain
+          // <input> vertically centers its text within a set height on
+          // its own, so this doesn't need extra centering rules).
+          ...(isDateOrTime ? { WebkitAppearance: "none", appearance: "none", height: "48px" } : {}),
         }}
       />
     </div>
@@ -1676,13 +1683,22 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
               borderRadius: 4,
               color: T.ash,
               colorScheme: "light",
-              // Same defensive properties as TextField's date/time
-              // handling — this input was built separately and never got
-              // them, which is very likely the real gap here.
+              // Same fix as TextField's date/time handling — this
+              // input was built separately and never got it: iOS Safari
+              // lays out a native time control's segments using its own
+              // intrinsic sizing that can beat a plain width:100%, so
+              // appearance:none is needed to make it respect the box.
+              // That same native appearance is also what enforces a
+              // touch-friendly minimum height, so an explicit height
+              // compensates for losing it (a plain <input> centers its
+              // text within a set height on its own).
               boxSizing: "border-box",
               minWidth: 0,
               maxWidth: "100%",
               display: "block",
+              WebkitAppearance: "none",
+              appearance: "none",
+              height: "48px",
             }}
           />
           <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>
