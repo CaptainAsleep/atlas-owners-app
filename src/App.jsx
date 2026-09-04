@@ -143,6 +143,19 @@ function Eyebrow({ children }) {
   );
 }
 
+// Native <input type="time"> stores/emits 24-hour "HH:MM". Older events
+// (and anything hand-edited) may still carry a free-text value like
+// "9:00 AM (gates)" from before the field was a time picker — that won't
+// match the pattern below, so it's returned as-is rather than mangled.
+function formatTimeStr(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t || "");
+  if (!m) return t || "";
+  let h = parseInt(m[1], 10);
+  const suffix = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${m[2]} ${suffix}`;
+}
+
 function TextField({ label, value, onChange, placeholder, type = "text", rows }) {
   const Tag = rows ? "textarea" : "input";
   // Native date/time widgets render their internal segments (day/month/
@@ -1248,7 +1261,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         </div>
         <div className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{ev.title}</div>
         <div className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
-          {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}{ev.endTime ? ` – ${ev.endTime}` : ""}
+          {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${formatTimeStr(ev.startTime)}` : ""}{ev.endTime ? ` – ${formatTimeStr(ev.endTime)}` : ""}
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
@@ -1596,10 +1609,10 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
         <div className="flex gap-2">
           <div className="flex-1">
-            <TextField label="Start Time" value={startTime} onChange={setStartTime} placeholder="e.g. 9:00 AM (gates), 11:00 AM start" />
+            <TextField label="Start Time" value={startTime} onChange={setStartTime} type="time" />
           </div>
           <div className="flex-1">
-            <TextField label="End Time (optional)" value={endTime} onChange={setEndTime} placeholder="e.g. 5:00 PM" />
+            <TextField label="End Time (optional)" value={endTime} onChange={setEndTime} type="time" />
           </div>
         </div>
 
@@ -2573,7 +2586,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                   {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
                 </div>
                 <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
-                  {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${ev.startTime}` : ""}{ev.endTime ? ` – ${ev.endTime}` : ""}
+                  {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${formatTimeStr(ev.startTime)}` : ""}{ev.endTime ? ` – ${formatTimeStr(ev.endTime)}` : ""}
                 </div>
                 {(typeof ev.maxCapacity === "number" || ev.interestCount > 0) && (
                   <div className="text-[11px] font-semibold mb-3 flex items-center gap-2">
