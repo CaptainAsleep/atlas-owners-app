@@ -500,6 +500,8 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
       const result = await claimField(field, ownerEmail, ownerId);
       if (result === "claimed" || result === "claimed-unverified") {
         onClaimed(field.id);
+      } else if (result === "cap-reached") {
+        setError("Your current plan doesn't include another field — upgrade your plan, or reach out on Discord, to claim more.");
       } else if (result === "verify-website") {
         setVerifyError("");
         setVerifyCode("");
@@ -2702,9 +2704,9 @@ function daysLeft(date) {
 }
 
 const SUBSCRIPTION_TIERS = [
-  { key: "starter", name: "Starter", price: "$100", desc: "For a single field running open plays every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
+  { key: "basic", name: "Basic", price: "$50", desc: "For a field running events every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
   { key: "pro", name: "Pro", price: "$200", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
-  { key: "enterprise", name: "Enterprise", price: "$500", desc: "For multi-location operators running at scale.", features: ["Unlimited fields", "Unlimited published events", "Unlimited players per event", "Live roster & QR check-in", "Saved waivers"] },
+  { key: "unlimited", name: "Unlimited", price: "$350", desc: "For big single fields, or multiple fields under one account.", features: ["Unlimited published events", "Unlimited players per event", "Up to 3 fields included — same flat price", "Live roster & QR check-in", "Saved waivers"] },
 ];
 
 // The real subscription screen — first time this app calls an actual

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 
@@ -109,23 +109,48 @@ export function useFieldActions() {
   // Returns "claimed", "verify-website", or "claimed-unverified" so the UI
   // can show the right next step.
   async function claimField(field, ownerEmail, ownerId) {
+    // Field-count cap, second axis of the pricing model (see
+    // FIELD_CAPS/tierFieldCap in functions/index.js and firestore.rules
+    // — this is the client-side pre-check for a clean error message; the
+    // rules below are the real enforcement). Basic/Pro/no-subscription
+    // all cap at 1, Unlimited at 3.
+    const ownerRef = doc(db, "owners", ownerId);
+    const ownerSnap = await getDoc(ownerRef);
+    const ownerData = ownerSnap.data() || {};
+    const fieldCap = ownerData.subscriptionTier === "unlimited" ? 3 : 1;
+    const claimedFieldCount = ownerData.claimedFieldCount || 0;
+    if (claimedFieldCount >= fieldCap) {
+      return "cap-reached";
+    }
+
     const emailDomain = (ownerEmail || "").split("@")[1];
     if (field.ownerEmailDomain && emailDomain === field.ownerEmailDomain) {
-      await updateDoc(doc(db, "fields", field.id), {
+      // Batched, not two separate writes — the field claim and the
+      // owner's own claimedFieldCount both need to land together (there's
+      // no Cloud Function on this path to do it server-side), and
+      // firestore.rules only allows the counter to move up by exactly 1,
+      // so this has to be the same atomic unit as the claim itself.
+      const batch = writeBatch(db);
+      batch.update(doc(db, "fields", field.id), {
         ownerId,
         claimed: true,
         claimVerification: "domain",
       });
+      batch.update(ownerRef, { claimedFieldCount: increment(1) });
+      await batch.commit();
       return "claimed";
     }
     if (field.website) {
       return "verify-website";
     }
-    await updateDoc(doc(db, "fields", field.id), {
+    const batch = writeBatch(db);
+    batch.update(doc(db, "fields", field.id), {
       ownerId,
       claimed: true,
       claimVerification: "unverified",
     });
+    batch.update(ownerRef, { claimedFieldCount: increment(1) });
+    await batch.commit();
     return "claimed-unverified";
   }
 
