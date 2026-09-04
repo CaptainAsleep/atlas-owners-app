@@ -1267,6 +1267,20 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         </div>
 
         {(() => {
+          // Price Options means the real per-player cost isn't one flat
+          // number — a price × capacity estimate would just be wrong (or
+          // misleadingly low, if it silently ignored the choices
+          // entirely), so this shows a plain "varies" note instead of a
+          // number, rather than guessing at a range.
+          if (ev.priceOptions?.choices?.length) {
+            return (
+              <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+                  Projected Revenue: <span style={{ fontWeight: 600, color: T.accent }}>Price varies</span> — depends on what players choose, see Price Options above
+                </div>
+              </div>
+            );
+          }
           const p = parsePrice(ev.price);
           const cap = typeof ev.maxCapacity === "number" ? ev.maxCapacity : parseInt(ev.maxCapacity, 10);
           if (!p || !cap) return null;
@@ -1332,6 +1346,17 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [patchName, setPatchName] = useState(existing?.checkInPatch?.name || "");
   const [patchImageUrl, setPatchImageUrl] = useState(existing?.checkInPatch?.imageUrl || null);
   const [patchUploading, setPatchUploading] = useState(false);
+  // Price Options — for events where the real cost depends on what the
+  // player picks (weapon class, BB weight, etc.) rather than one flat
+  // number. Empty by default; a normal flat-price or free event never
+  // touches this. Each choice's price is kept as a raw string here, same
+  // as Rental Gear's price field below, and only converted to cents at
+  // save time.
+  const [priceOptionsLabel, setPriceOptionsLabel] = useState(existing?.priceOptions?.label || "");
+  const [priceOptionsRequired, setPriceOptionsRequired] = useState(existing?.priceOptions?.required ?? true);
+  const [priceOptionsChoices, setPriceOptionsChoices] = useState(
+    (existing?.priceOptions?.choices || []).map((c) => ({ id: c.id, label: c.label, price: c.priceCents != null ? String(c.priceCents / 100) : "" }))
+  );
   const patchInputRef = React.useRef(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
@@ -1350,12 +1375,23 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     startTime !== snapshot.startTime || endTime !== snapshot.endTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     waiverText !== (existing?.waiver?.text || "") ||
-    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null);
+    patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
+    priceOptionsLabel !== (existing?.priceOptions?.label || "") ||
+    priceOptionsRequired !== (existing?.priceOptions?.required ?? true) ||
+    JSON.stringify(priceOptionsChoices) !== JSON.stringify((existing?.priceOptions?.choices || []).map((c) => ({ id: c.id, label: c.label, price: c.priceCents != null ? String(c.priceCents / 100) : "" })));
   // Publishing a currently-unchanged draft is still a real, meaningful
   // action (draft → published) even with zero content edits — Save as
   // Draft has no such case, since re-saving identical draft content really
   // is a no-op.
   const canPublish = hasChanges || existing?.draft;
+
+  const addPriceChoice = () => setPriceOptionsChoices([...priceOptionsChoices, { id: `choice_${Date.now()}_${priceOptionsChoices.length}`, label: "", price: "" }]);
+  const updatePriceChoice = (i, key, value) => {
+    const next = [...priceOptionsChoices];
+    next[i] = { ...next[i], [key]: value };
+    setPriceOptionsChoices(next);
+  };
+  const removePriceChoice = (i) => setPriceOptionsChoices(priceOptionsChoices.filter((_, idx) => idx !== i));
 
   // A lightweight, one-time heads-up (not a live listener — this is just
   // advisory, not something that needs to stay in sync while editing) —
@@ -1447,6 +1483,18 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     endTime: endTime || null,
     briefingTime: briefingTime || null,
     price: price || null,
+    // One optional group of player-picked, differently-priced choices
+    // (weapon class, BB weight, etc.) — null for a normal flat-price or
+    // free event. Only choices with both a label and a price are kept;
+    // a half-filled row just gets dropped rather than saved broken.
+    priceOptions: (() => {
+      const validChoices = priceOptionsChoices
+        .filter((c) => c.label.trim() && c.price.trim())
+        .map((c) => ({ id: c.id, label: c.label.trim(), priceCents: Math.round((parsePrice(c.price) || 0) * 100) }));
+      return validChoices.length > 0
+        ? { label: priceOptionsLabel.trim() || "Choose an option", required: priceOptionsRequired, choices: validChoices }
+        : null;
+    })(),
     maxCapacity: maxCapacity ? parseInt(maxCapacity, 10) : null,
     type,
     description: description.trim(),
@@ -1613,6 +1661,41 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${projectedRevenue}</span> — entry cost × capacity, not a real payment yet
           </p>
         )}
+        {price.trim() && parsePrice(price) === null && priceOptionsChoices.filter((c) => c.label.trim() && c.price.trim()).length === 0 && (
+          <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.alert }}>
+            Heads up — since "{price.trim()}" isn't a plain number, this event won't collect any payment in the app right now. Use Price Options below if the real cost varies by player, or enter a plain number (e.g. 25) for a flat price.
+          </p>
+        )}
+
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Price Options</label>
+          <button onClick={addPriceChoice} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Add Choice</button>
+        </div>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          For events where the real price depends on what a player picks — weapon class, BB weight, that kind of thing. Leave empty for a normal flat-price (or free) event.
+        </p>
+        {priceOptionsChoices.length > 0 && (
+          <>
+            <TextField label="What are players choosing?" value={priceOptionsLabel} onChange={setPriceOptionsLabel} placeholder="e.g. Choose your class, BB Weight" />
+            <label className="flex items-center gap-2 mb-3 text-[12px]" style={{ ...body, color: T.ashDim }}>
+              <input type="checkbox" checked={priceOptionsRequired} onChange={(e) => setPriceOptionsRequired(e.target.checked)} />
+              Players must choose one to book (uncheck for an optional add-on instead)
+            </label>
+          </>
+        )}
+        {priceOptionsChoices.map((c, i) => (
+          <div key={c.id} className="mb-3 p-3" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+            <div className="flex gap-2">
+              <input value={c.label} onChange={(e) => updatePriceChoice(i, "label", e.target.value)} placeholder="e.g. AR, LMG, .25g BBs"
+                className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <input value={c.price} onChange={(e) => updatePriceChoice(i, "price", e.target.value)} placeholder="$20"
+                className="w-20 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <button onClick={() => removePriceChoice(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 4 }}>
+                <Trash2 size={14} color={T.alert} />
+              </button>
+            </div>
+          </div>
+        ))}
 
         <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
@@ -1961,6 +2044,11 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                 PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
               </span>
             )}
+            {matchingBooking?.selectedChoiceLabel && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: 2 }}>
+                {matchingBooking.selectedChoiceLabel}
+              </span>
+            )}
           </div>
           {secondaryName && (
             <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{secondaryName}</div>
@@ -2030,9 +2118,10 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Reserved Players.csv`,
-                ["Callsign", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
+                ["Callsign", "Selected Option", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
+                  b.selectedChoiceLabel || "",
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
                   b.checkedIn ? "Yes" : "No",
                   b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
@@ -2704,9 +2793,9 @@ function daysLeft(date) {
 }
 
 const SUBSCRIPTION_TIERS = [
-  { key: "basic", name: "Basic", price: "$50", desc: "For a field running events every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
-  { key: "pro", name: "Pro", price: "$200", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
-  { key: "unlimited", name: "Unlimited", price: "$350", desc: "For big single fields, or multiple fields under one account.", features: ["Unlimited published events", "Unlimited players per event", "Up to 3 fields included — same flat price", "Live roster & QR check-in", "Saved waivers"] },
+  { key: "basic", name: "Basic", price: "$50", annualPrice: "$40", annualTotal: "$480", desc: "For a field running events every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
+  { key: "pro", name: "Pro", price: "$200", annualPrice: "$160", annualTotal: "$1,920", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
+  { key: "unlimited", name: "Unlimited", price: "$350", annualPrice: "$280", annualTotal: "$3,360", desc: "For big single fields, or multiple fields under one account.", features: ["Unlimited published events", "Unlimited players per event", "Up to 3 fields included — same flat price", "Live roster & QR check-in", "Saved waivers"] },
 ];
 
 // The real subscription screen — first time this app calls an actual
@@ -2718,6 +2807,7 @@ const SUBSCRIPTION_TIERS = [
 function BillingScreen({ profile, onBack }) {
   const [loadingTier, setLoadingTier] = useState(null);
   const [error, setError] = useState("");
+  const [billingPeriod, setBillingPeriod] = useState("monthly");
 
   const [portalLoading, setPortalLoading] = useState(false);
 
@@ -2726,7 +2816,7 @@ function BillingScreen({ profile, onBack }) {
     setError("");
     try {
       const createCheckout = httpsCallable(functions, "createSubscriptionCheckout");
-      const result = await createCheckout({ tier });
+      const result = await createCheckout({ tier, billingPeriod });
       // Opens in a genuinely separate tab rather than navigating this
       // app's own window away — the same real, confirmed WebKit bug that
       // broke the Payouts flow (corrupting this PWA's own rendering after
@@ -2902,6 +2992,23 @@ function BillingScreen({ profile, onBack }) {
         <p className="text-[11px] mb-4 text-center" style={{ ...body, color: T.ashFaint }}>
           Checkout opens in a new browser tab. Once you're done on Stripe's page, just come back here — this updates on its own once it's confirmed.
         </p>
+        <div className="flex justify-center gap-1 mb-4">
+          {[{ key: "monthly", label: "Monthly" }, { key: "annual", label: "Annual (save 20%)" }].map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setBillingPeriod(p.key)}
+              className="px-3 py-1.5 text-[11px] font-semibold"
+              style={{
+                ...body,
+                color: billingPeriod === p.key ? "#FFFFFF" : T.ashDim,
+                background: billingPeriod === p.key ? T.ash : T.panelAlt,
+                borderRadius: 999,
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-col gap-3">
           {SUBSCRIPTION_TIERS.map((tier) => (
             <div key={tier.key} className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${tier.featured ? T.accent : T.line}` }}>
@@ -2910,8 +3017,14 @@ function BillingScreen({ profile, onBack }) {
               )}
               <div className="flex items-baseline justify-between mb-1">
                 <span className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{tier.name}</span>
-                <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>{tier.price}<span className="text-[11px]" style={{ color: T.ashFaint }}>/mo</span></span>
+                <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>
+                  {billingPeriod === "annual" ? tier.annualPrice : tier.price}
+                  <span className="text-[11px]" style={{ color: T.ashFaint }}>/mo</span>
+                </span>
               </div>
+              {billingPeriod === "annual" && (
+                <div className="text-[10px] mb-1 text-right" style={{ ...body, color: T.ashFaint }}>Billed {tier.annualTotal}/yr</div>
+              )}
               <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>{tier.desc}</p>
               <ul className="mb-3">
                 {tier.features.map((f) => (
