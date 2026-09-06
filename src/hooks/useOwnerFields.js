@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 
@@ -109,19 +109,10 @@ export function useFieldActions() {
   // Returns "claimed", "verify-website", or "claimed-unverified" so the UI
   // can show the right next step.
   async function claimField(field, ownerEmail, ownerId) {
-    // Field-count cap, second axis of the pricing model (see
-    // FIELD_CAPS/tierFieldCap in functions/index.js and firestore.rules
-    // — this is the client-side pre-check for a clean error message; the
-    // rules below are the real enforcement). Basic/Pro/no-subscription
-    // all cap at 1, Unlimited at 3.
+    // No field-count cap anymore (Atlas Standard has no subscription
+    // tiers to key one off of — see firestore.rules and functions/index.js
+    // for the matching removal).
     const ownerRef = doc(db, "owners", ownerId);
-    const ownerSnap = await getDoc(ownerRef);
-    const ownerData = ownerSnap.data() || {};
-    const fieldCap = ownerData.subscriptionTier === "unlimited" ? 3 : 1;
-    const claimedFieldCount = ownerData.claimedFieldCount || 0;
-    if (claimedFieldCount >= fieldCap) {
-      return "cap-reached";
-    }
 
     const emailDomain = (ownerEmail || "").split("@")[1];
     if (field.ownerEmailDomain && emailDomain === field.ownerEmailDomain) {

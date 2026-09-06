@@ -13,7 +13,7 @@ import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useOwnerBookingRevenue, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
-import { collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 /* ---------- design tokens — same palette as the player app for immediate
@@ -320,15 +320,6 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
     return sum + (p && cap ? p * cap : 0);
   }, 0);
 
-  // Trial-awareness for the banner below — nobody should find out they're
-  // on a trial (or what it costs once it ends) only at the moment they
-  // get charged.
-  const trialPeriodEnd = profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate
-    ? profile.currentPeriodEnd.toDate()
-    : null;
-  const trialDaysRemaining = trialPeriodEnd ? daysLeft(trialPeriodEnd) : null;
-  const trialTier = trialPeriodEnd ? SUBSCRIPTION_TIERS.find((t) => t.key === profile.subscriptionTier) : null;
-
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
@@ -342,24 +333,6 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
-        {trialPeriodEnd && (
-          <button
-            onClick={onOpenBilling}
-            className="w-full mb-4 p-4 flex items-center gap-3 text-left"
-            style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}
-          >
-            <Calendar size={18} color={T.accent} />
-            <div className="flex-1">
-              <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>
-                {trialDaysRemaining > 0 ? `${trialDaysRemaining} day${trialDaysRemaining === 1 ? "" : "s"} left in your free trial` : "Your free trial ends today"}
-              </div>
-              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>
-                You'll be charged {trialTier?.price || ""}/mo for {trialTier?.name || profile.subscriptionTier} on {trialPeriodEnd.toLocaleDateString()} unless you cancel or change plans first.
-              </div>
-            </div>
-            <ChevronRight size={16} color={T.accent} />
-          </button>
-        )}
         {myFields.length > 0 && !profile?.payoutsEnabled && (
           <button
             onClick={onOpenPayouts}
@@ -538,8 +511,6 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
       const result = await claimField(field, ownerEmail, ownerId);
       if (result === "claimed" || result === "claimed-unverified") {
         onClaimed(field.id);
-      } else if (result === "cap-reached") {
-        setError("Your current plan doesn't include another field — upgrade your plan, or reach out on Discord, to claim more.");
       } else if (result === "verify-website") {
         setVerifyError("");
         setVerifyCode("");
@@ -2868,70 +2839,32 @@ function daysLeft(date) {
   return Math.max(0, Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
 }
 
-const SUBSCRIPTION_TIERS = [
-  { key: "basic", name: "Basic", price: "$50", annualPrice: "$40", annualTotal: "$480", desc: "For a field running events every so often.", features: ["1 field", "Up to 4 published events / month", "Up to 75 players per event", "Live roster & QR check-in", "Saved waivers"] },
-  { key: "pro", name: "Pro", price: "$200", annualPrice: "$160", annualTotal: "$1,920", desc: "For a field running events most weekends.", features: ["1 field", "Up to 10 published events / month", "Up to 300 players per event", "Live roster & QR check-in", "Saved waivers"], featured: true },
-  { key: "unlimited", name: "Unlimited", price: "$350", annualPrice: "$280", annualTotal: "$3,360", desc: "For big single fields, or multiple fields under one account.", features: ["Unlimited published events", "Unlimited players per event", "Up to 3 fields included — same flat price", "Live roster & QR check-in", "Saved waivers"] },
-];
-
-// The real subscription screen — first time this app calls an actual
-// Cloud Function rather than talking to Firestore directly. Deliberately
-// honest about states this doesn't fully handle yet: past_due has no
-// self-serve "update payment method" flow (that's a separate Stripe
-// billing-portal integration, not built), so it points to support instead
-// of pretending to solve it.
-function BillingScreen({ profile, onBack }) {
-  const [loadingTier, setLoadingTier] = useState(null);
+// Atlas Standard's fee model: how the platform fee (3.5% + $1.30, capped
+// at $5.00) is handled at checkout — added on top for the player, or
+// absorbed out of the field's own payout. Chosen once, right after an
+// owner's first field claim, and locked in for good; firestore.rules
+// enforces the lock server-side (owners/{ownerId} blocks any further
+// client write that touches feeModel once it's set), this screen is just
+// the one place it's ever set in the first place. No back button when
+// used as the mandatory gate (no onBack passed, same pattern the old
+// BillingScreen used); the read-only Settings entry passes onBack and
+// shows whichever option was already picked instead of a picker.
+function FeeModelScreen({ profile, user, onBack }) {
+  const [savingOption, setSavingOption] = useState(null);
   const [error, setError] = useState("");
-  const [billingPeriod, setBillingPeriod] = useState("monthly");
 
-  const [portalLoading, setPortalLoading] = useState(false);
-
-  const handleChoosePlan = async (tier) => {
-    setLoadingTier(tier);
+  const handleChoose = async (option) => {
+    setSavingOption(option);
     setError("");
     try {
-      const createCheckout = httpsCallable(functions, "createSubscriptionCheckout");
-      const result = await createCheckout({ tier, billingPeriod });
-      // Opens in a genuinely separate tab rather than navigating this
-      // app's own window away — the same real, confirmed WebKit bug that
-      // broke the Payouts flow (corrupting this PWA's own rendering after
-      // returning from an external site through the same tab) applies
-      // here too, same redirect pattern. Opening separately means this
-      // tab never actually leaves, so it never has the chance to hit it.
-      window.open(result.data.url, "_blank");
-      setLoadingTier(null);
+      await updateDoc(doc(db, "owners", user.uid), { feeModel: option });
     } catch (err) {
-      console.error("createSubscriptionCheckout failed:", err);
-      setError("Couldn't start checkout — try again, or reach out on Discord if it keeps happening.");
-      setLoadingTier(null);
+      console.error("Setting feeModel failed:", err);
+      setError("Couldn't save your choice — try again, or reach out on Discord if it keeps happening.");
+      setSavingOption(null);
     }
   };
 
-  // The real cancel-or-change-plan link — Stripe's own hosted Customer
-  // Portal, same "opens in a separate tab" reasoning as checkout above.
-  // profile updates on its own once Stripe's webhook confirms whatever
-  // the owner did there (this screen never has to know which).
-  const handleOpenPortal = async () => {
-    setPortalLoading(true);
-    setError("");
-    try {
-      const createPortalSession = httpsCallable(functions, "createBillingPortalSession");
-      const result = await createPortalSession();
-      window.open(result.data.url, "_blank");
-    } catch (err) {
-      console.error("createBillingPortalSession failed:", err);
-      setError("Couldn't open billing — try again, or reach out on Discord if it keeps happening.");
-    } finally {
-      setPortalLoading(false);
-    }
-  };
-
-  // onBack is optional — this same screen doubles as a mandatory gate
-  // (once an owner has claimed a real field, they need a real plan
-  // before going further) as well as an ordinary Settings entry. A gate
-  // has nowhere to go "back" to, so the back button and its explanatory
-  // line only render when there's actually somewhere to return to.
   const header = (
     <div className="px-6 pt-2 pb-4" style={{ borderBottom: onBack ? `1px solid ${T.line}` : "none" }}>
       {onBack ? (
@@ -2939,187 +2872,84 @@ function BillingScreen({ profile, onBack }) {
           <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center">
             <ChevronLeft size={20} color={T.ash} />
           </button>
-          <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Billing</h1>
+          <h1 className="flex-1 text-center text-[16px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Fee Model</h1>
         </div>
       ) : (
         <div className="pt-6">
-          <h1 className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Choose a plan to continue</h1>
-          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>You're all set on your field — just pick a plan to start managing it. Every plan includes a real 30-day free trial.</p>
+          <h1 className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Choose how Atlas's fee is handled</h1>
+          <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>You're all set on your field — just pick one option to start booking players. This is a one-time choice, locked in once you pick.</p>
         </div>
       )}
     </div>
   );
 
-  // Comped account (The Compound, as launch partner) — free forever, no
-  // billing UI relevant to them at all.
-  if (profile?.comped) {
-    return (
-      <div className="h-full overflow-y-auto" style={flatBg}>
-        {header}
-        <div className="px-6 pt-8 text-center">
-          <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center" style={{ background: T.good, borderRadius: 999 }}>
-            <Check size={22} color="#FFFFFF" strokeWidth={3} />
-          </div>
-          <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Free, permanent access</div>
-          <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>As one of our launch partners, you'll never be billed for Atlas.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const status = profile?.subscriptionStatus;
-  const currentTier = SUBSCRIPTION_TIERS.find((t) => t.key === profile?.subscriptionTier);
-
-  if (status === "active" || status === "trialing") {
-    const periodEnd = profile.currentPeriodEnd?.toDate ? profile.currentPeriodEnd.toDate() : null;
-    const remaining = status === "trialing" && periodEnd ? daysLeft(periodEnd) : null;
-    // A subscription someone already canceled through the Stripe portal
-    // stays "active" right up until the real period-end deletion event —
-    // that's the "cancel at period end" behavior our portal config uses,
-    // so they keep what they already paid for instead of losing access
-    // mid-cycle. Without calling that out here, this screen would show
-    // "ACTIVE, renews on <date>" with no sign the cancellation actually
-    // registered, which is exactly the confusion this screen exists to
-    // prevent.
-    const cancelPending = !!profile.cancelAtPeriodEnd;
+  // Already chosen — read-only info view. Only reachable from Settings;
+  // the mandatory gate below never renders this screen once feeModel is
+  // actually set.
+  if (profile?.feeModel) {
+    const isAbsorb = profile.feeModel === "absorb";
     return (
       <div className="h-full overflow-y-auto pb-24" style={flatBg}>
         {header}
         <div className="px-6 pt-6">
-          {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
-          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${cancelPending ? T.ashFaint : T.good}` }}>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: cancelPending ? T.ashDim : T.good, border: `1px solid ${cancelPending ? T.ashDim : T.good}`, borderRadius: 2 }}>
-                {cancelPending ? "CANCELED" : status === "trialing" ? "FREE TRIAL" : "ACTIVE"}
-              </span>
+          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.good}` }}>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>LOCKED IN</span>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>
+              {isAbsorb ? "Absorb Fee as Field" : "Pass Fee to Player"}
             </div>
-            <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{currentTier?.name || profile.subscriptionTier} — {currentTier?.price || ""}/mo</div>
-            {periodEnd && (
-              <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>
-                {cancelPending ? "Access ends" : status === "trialing" ? "Trial ends" : "Renews"} {periodEnd.toLocaleDateString()}
-              </p>
-            )}
-            {/* The actual point of this whole screen: nobody should be
-                surprised by a real charge. Spell out exactly when it
-                happens, for how much, and on what plan, right next to the
-                button that avoids it. */}
-            {cancelPending && periodEnd ? (
-              <p className="text-[12px] mt-3 font-medium" style={{ ...body, color: T.ash }}>
-                Your plan is canceled — you'll keep {currentTier?.name || profile.subscriptionTier} until {periodEnd.toLocaleDateString()}, and you won't be charged again after that.
-              </p>
-            ) : status === "trialing" && periodEnd && (
-              <p className="text-[12px] mt-3 font-medium" style={{ ...body, color: T.ash }}>
-                {remaining > 0
-                  ? `${remaining} day${remaining === 1 ? "" : "s"} left in your free trial.`
-                  : "Your free trial ends today."} You'll be charged {currentTier?.price || ""}/mo for {currentTier?.name || profile.subscriptionTier} on {periodEnd.toLocaleDateString()} unless you cancel before then.
-              </p>
-            )}
+            <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>
+              {isAbsorb
+                ? "Players pay your exact listed price. Atlas's fee (3.5% + $1.30, capped at $5.00) comes out of your payout."
+                : "Atlas's fee (3.5% + $1.30, capped at $5.00) is added at checkout. You keep 100% of your listed ticket price."}
+            </p>
           </div>
-          <button
-            onClick={handleOpenPortal}
-            disabled={portalLoading}
-            className="w-full py-2.5 text-[13px] font-semibold mb-2"
-            style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4, opacity: portalLoading ? 0.6 : 1 }}
-          >
-            {portalLoading ? "Opening Stripe…" : cancelPending ? "Manage Billing" : "Manage or Cancel Plan"}
-          </button>
           <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>
-            {cancelPending
-              ? "Changed your mind? Stripe's billing page lets you resume your plan before it actually ends."
-              : "Opens Stripe's own billing page — change plans, update your card, or cancel outright, all directly with Stripe."}
+            This is locked in for your account. Reach out on Discord if you genuinely need it changed.
           </p>
         </div>
       </div>
     );
   }
 
-  if (status === "past_due" || status === "unpaid") {
-    return (
-      <div className="h-full overflow-y-auto pb-24" style={flatBg}>
-        {header}
-        <div className="px-6 pt-6">
-          {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
-          <div className="p-4 mb-4" style={{ background: "rgba(188,51,39,0.08)", border: `1px solid ${T.alert}`, borderRadius: 8 }}>
-            <div className="text-[14px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payment issue on your account</div>
-            <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>
-              Your last payment didn't go through. Update your card or cancel below, or reach out on Discord if you'd like help directly.
-            </p>
-          </div>
-          <button
-            onClick={handleOpenPortal}
-            disabled={portalLoading}
-            className="w-full py-2.5 text-[13px] font-semibold"
-            style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: portalLoading ? 0.6 : 1 }}
-          >
-            {portalLoading ? "Opening Stripe…" : "Update Payment or Cancel"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // No subscription yet, or a previously canceled one — show the real
-  // tier picker.
+  // Not chosen yet — the real picker (also doubles as the mandatory gate,
+  // rendered with no onBack in that case).
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       {header}
       <div className="px-6 pt-6">
         {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
         <p className="text-[11px] mb-4 text-center" style={{ ...body, color: T.ashFaint }}>
-          Checkout opens in a new browser tab. Once you're done on Stripe's page, just come back here — this updates on its own once it's confirmed.
+          Atlas costs $0/month, always. Every ticket carries a small platform fee (3.5% + $1.30, capped at $5.00) — you choose who pays it.
         </p>
-        <div className="flex justify-center gap-1 mb-4">
-          {[{ key: "monthly", label: "Monthly" }, { key: "annual", label: "Annual (save 20%)" }].map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setBillingPeriod(p.key)}
-              className="px-3 py-1.5 text-[11px] font-semibold"
-              style={{
-                ...body,
-                color: billingPeriod === p.key ? "#FFFFFF" : T.ashDim,
-                background: billingPeriod === p.key ? T.ash : T.panelAlt,
-                borderRadius: 999,
-              }}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
         <div className="flex flex-col gap-3">
-          {SUBSCRIPTION_TIERS.map((tier) => (
-            <div key={tier.key} className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${tier.featured ? T.accent : T.line}` }}>
-              {tier.featured && (
-                <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: "#FFFFFF", background: T.accent, borderRadius: 2 }}>MOST POPULAR</span>
-              )}
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{tier.name}</span>
-                <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>
-                  {billingPeriod === "annual" ? tier.annualPrice : tier.price}
-                  <span className="text-[11px]" style={{ color: T.ashFaint }}>/mo</span>
-                </span>
-              </div>
-              {billingPeriod === "annual" && (
-                <div className="text-[10px] mb-1 text-right" style={{ ...body, color: T.ashFaint }}>Billed {tier.annualTotal}/yr</div>
-              )}
-              <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>{tier.desc}</p>
-              <ul className="mb-3">
-                {tier.features.map((f) => (
-                  <li key={f} className="text-[11px] flex items-center gap-1.5 mb-1" style={{ ...body, color: T.ashDim }}>
-                    <Check size={11} color={T.good} /> {f}
-                  </li>
-                ))}
-              </ul>
-              <div className="text-[10px] font-semibold mb-2" style={{ ...body, color: T.good }}>First month free</div>
-              <button
-                onClick={() => handleChoosePlan(tier.key)}
-                disabled={loadingTier !== null}
-                className="w-full py-2.5 text-[13px] font-semibold"
-                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loadingTier !== null && loadingTier !== tier.key ? 0.5 : 1 }}
-              >
-                {loadingTier === tier.key ? "Opening Stripe…" : "Choose Plan"}
-              </button>
+          <div className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: "#FFFFFF", background: T.accent, borderRadius: 2 }}>DEFAULT</span>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Pass Fee to Player</div>
+            <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>The fee is added at checkout. You keep 100% of your listed ticket price.</p>
+            <div className="p-3 mb-3" style={{ background: T.panelAlt, borderRadius: 6 }}>
+              <div className="text-[10px] font-semibold mb-1" style={{ ...mono, color: T.ashFaint }}>ON A $20.00 TICKET</div>
+              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>Player pays $22.00 · You keep $20.00</div>
             </div>
-          ))}
+            <PrimaryButton onClick={() => handleChoose("pass_to_player")} disabled={savingOption !== null}>
+              {savingOption === "pass_to_player" ? "Saving…" : "Choose This Option"}
+            </PrimaryButton>
+          </div>
+          <div className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Absorb Fee as Field</div>
+            <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>Players pay your exact listed price, with zero added fees at checkout. The fee comes out of your payout instead.</p>
+            <div className="p-3 mb-3" style={{ background: T.panelAlt, borderRadius: 6 }}>
+              <div className="text-[10px] font-semibold mb-1" style={{ ...mono, color: T.ashFaint }}>ON A $20.00 TICKET</div>
+              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>Player pays $20.00 · You net $18.00</div>
+            </div>
+            <button
+              onClick={() => handleChoose("absorb")}
+              disabled={savingOption !== null}
+              className="w-full py-2.5 text-[13px] font-semibold"
+              style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4, opacity: savingOption !== null && savingOption !== "absorb" ? 0.5 : 1 }}
+            >
+              {savingOption === "absorb" ? "Saving…" : "Choose This Option"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -3127,8 +2957,8 @@ function BillingScreen({ profile, onBack }) {
 }
 
 // The "get paid for player bookings" half — entirely separate from
-// BillingScreen above, both conceptually and in what it actually calls.
-// Same account architecture principle as subscriptions: this screen never
+// FeeModelScreen above, both conceptually and in what it actually calls.
+// Same account architecture principle used throughout: this screen never
 // asks for or sees a bank account number — the owner enters that directly
 // with Stripe, on Stripe's own hosted page.
 function PayoutsScreen({ profile, onBack, checking }) {
@@ -3374,7 +3204,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
 
-        <Eyebrow>Billing</Eyebrow>
+        <Eyebrow>Fee Model</Eyebrow>
         <button
           onClick={onOpenBilling}
           className="w-full mb-3 p-4 flex items-center justify-between"
@@ -3382,15 +3212,11 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         >
           <div className="text-left">
             <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>
-              {profile?.comped ? "Free, permanent access" : profile?.cancelAtPeriodEnd ? "Plan canceled" : profile?.subscriptionStatus === "active" || profile?.subscriptionStatus === "trialing" ? "Manage Subscription" : "Choose a Plan"}
+              {profile?.feeModel === "absorb" ? "Absorb Fee as Field" : profile?.feeModel === "pass_to_player" ? "Pass Fee to Player" : "Choose a Fee Model"}
             </span>
-            {profile?.cancelAtPeriodEnd && profile.currentPeriodEnd?.toDate ? (
+            {profile?.feeModel && (
               <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
-                Access ends {profile.currentPeriodEnd.toDate().toLocaleDateString()}
-              </span>
-            ) : profile?.subscriptionStatus === "trialing" && profile.currentPeriodEnd?.toDate && (
-              <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
-                Trial ends in {daysLeft(profile.currentPeriodEnd.toDate())} day{daysLeft(profile.currentPeriodEnd.toDate()) === 1 ? "" : "s"}
+                Locked in
               </span>
             )}
           </div>
@@ -3917,14 +3743,14 @@ export default function App() {
   }
 
   // Whether the owner is logged in, past the legal-agreement screen, and
-  // past the billing hard-gate — the payout celebration popup only makes
-  // sense once someone's actually looking at their real dashboard, not
-  // stacked on top of "accept our terms" or "pick a plan."
+  // past the fee-model hard-gate — the payout celebration popup only
+  // makes sense once someone's actually looking at their real dashboard,
+  // not stacked on top of "accept our terms" or "pick a fee model."
   const pastOnboardingGates =
     !!user &&
     !!profile &&
     profile.acceptedTermsVersion === CURRENT_TERMS_VERSION &&
-    !(myFields.length > 0 && !profile.comped && profile.subscriptionStatus !== "active" && profile.subscriptionStatus !== "trialing");
+    !(myFields.length > 0 && !profile.comped && !profile.feeModel);
 
   let content;
   let showNav = false;
@@ -3935,18 +3761,13 @@ export default function App() {
     content = <LoadingScreen />;
   } else if (profile.acceptedTermsVersion !== CURRENT_TERMS_VERSION) {
     content = <LegalAgreementScreen onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
-  } else if (
-    myFields.length > 0 &&
-    !profile.comped &&
-    profile.subscriptionStatus !== "active" &&
-    profile.subscriptionStatus !== "trialing"
-  ) {
+  } else if (myFields.length > 0 && !profile.comped && !profile.feeModel) {
     // A real gate, not just a Settings entry — once an owner has actually
     // claimed a field (not before; claiming itself always stays open),
-    // they can't go any further without a real plan. Reuses the exact
-    // same BillingScreen used from Settings — no onBack here is what
-    // turns it from an optional page into a hard block.
-    content = <BillingScreen profile={profile} />;
+    // they can't go any further without choosing a fee model. Reuses the
+    // exact same FeeModelScreen used from Settings — no onBack here is
+    // what turns it from an optional page into a hard block.
+    content = <FeeModelScreen profile={profile} user={user} />;
   } else if (overlay === "claim") {
     content = (
       <ClaimFieldScreen
@@ -3962,7 +3783,7 @@ export default function App() {
       />
     );
   } else if (overlay === "billing") {
-    content = <BillingScreen profile={profile} onBack={closeOverlay} />;
+    content = <FeeModelScreen profile={profile} user={user} onBack={closeOverlay} />;
   } else if (overlay === "payouts") {
     content = <PayoutsScreen profile={profile} onBack={closeOverlay} checking={checkingPayouts} />;
   } else if (overlay === "claimWelcome" && activeField) {
