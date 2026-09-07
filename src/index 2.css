@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  /* height: 100% here resolves against the browser's own viewport model
+     — confirmed corrupted by a real WebKit bug after returning from an
+     external site with its own "smart app banner" (documented on Apple's
+     own developer forums). window.screen.height, set as this variable by
+     the app itself, stays reliable through that corruption; this is the
+     real fix, not the overflow/position rules below, which were solving
+     a real but different problem (the page being able to scroll at all)
+     and stay for that reason.
+  */
+  height: var(--real-screen-height, 100%);
+  margin: 0;
+  background-color: #F2F2ED;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
