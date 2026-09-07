@@ -79,55 +79,67 @@ export async function checkInFromScan(rawText, eventId) {
 }
 
 
-// Real booking-fee revenue across every one of this owner's events, for
-// the Analytics screen. Same reasoning as the admin portal's version —
-// each event's own bookings subcollection, fetched directly rather than
-// a collectionGroup("bookings") query, which would double-count against
-// the player app's separate per-user mirror copy (see useAdminData.js's
-// comment for the full explanation of why that shape exists).
+// Real per-booking financial records across every one of this owner's
+// events, for the Analytics screen's financial breakdowns (total, by
+// month, by event, by field, CSV export). Same reasoning as the admin
+// portal's version — each event's own bookings subcollection, fetched
+// directly rather than a collectionGroup("bookings") query, which would
+// double-count against the player app's separate per-user mirror copy
+// (see useAdminData.js's comment for the full explanation of why that
+// shape exists).
 //
 // One-shot per distinct set of event ids rather than a live listener per
 // event — refetches whenever the owner's event list actually changes
 // (new event created, one edited), which is "fresh enough" for a screen
 // someone glances at, not something that needs to update mid-keystroke.
 //
-// Reports the owner's own share (amountPaidCents minus Atlas's
-// bookingFeeCents) — the actual dollars that landed in their connected
-// Stripe account via the destination charge — not Atlas's own cut, which
-// wouldn't mean anything useful shown back to a field owner.
-export function useOwnerBookingRevenue(events) {
-  const [stats, setStats] = useState({ paidBookingsCount: 0, revenueCents: 0 });
+// Returns one record per paid booking rather than a single reduced
+// total, so the screen can group by month/event/field itself without a
+// separate fetch per breakdown. netCents (amountPaidCents minus Atlas's
+// bookingFeeCents) is the owner's own share — the actual dollars that
+// land in their connected Stripe account via the destination charge —
+// not Atlas's own cut, which wouldn't mean anything useful shown back to
+// a field owner.
+export function useOwnerFinancials(events) {
+  const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const eventIdsKey = events.map((e) => e.id).join(",");
 
   useEffect(() => {
     if (events.length === 0) {
-      setStats({ paidBookingsCount: 0, revenueCents: 0 });
+      setRecords([]);
       setLoading(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
-    Promise.all(events.map((e) => getDocs(collection(db, "events", e.id, "bookings"))))
-      .then((snaps) => {
+    Promise.all(events.map((e) => getDocs(collection(db, "events", e.id, "bookings")).then((snap) => ({ event: e, snap }))))
+      .then((results) => {
         if (cancelled) return;
-        let paidBookingsCount = 0;
-        let revenueCents = 0;
-        snaps.forEach((snap) => {
+        const out = [];
+        results.forEach(({ event, snap }) => {
           snap.docs.forEach((d) => {
             const b = d.data();
-            if (!b.paid) return;
-            paidBookingsCount += 1;
-            if (typeof b.amountPaidCents === "number") {
-              revenueCents += b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0);
-            }
+            if (!b.paid || typeof b.amountPaidCents !== "number") return;
+            const bookingFeeCents = typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0;
+            out.push({
+              eventId: event.id,
+              eventTitle: event.title,
+              fieldId: event.fieldId,
+              fieldName: event.fieldName,
+              eventDate: event.endDate || event.date,
+              bookedAt: b.bookedAt,
+              amountPaidCents: b.amountPaidCents,
+              bookingFeeCents,
+              netCents: b.amountPaidCents - bookingFeeCents,
+            });
           });
         });
-        setStats({ paidBookingsCount, revenueCents });
+        setRecords(out);
         setLoading(false);
       })
       .catch((err) => {
-        console.error("useOwnerBookingRevenue error:", err);
+        console.error("useOwnerFinancials error:", err);
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
@@ -137,5 +149,5 @@ export function useOwnerBookingRevenue(events) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventIdsKey]);
 
-  return { paidBookingsCount: stats.paidBookingsCount, revenueCents: stats.revenueCents, statsLoading: loading };
+  return { records, financialsLoading: loading };
 }

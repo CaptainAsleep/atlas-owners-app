@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./leg
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, useOwnerBookingRevenue, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useEventBookings, useOwnerFinancials, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
 import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
@@ -2770,13 +2770,105 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
   );
 }
 
+function RevenueBarChart({ buckets }) {
+  // Small hand-rolled inline SVG bar chart — no charting dependency in
+  // this project, and a handful of monthly bars doesn't need one. Thin
+  // bars, 4px rounded top corners (the "data end"), flush square bottom
+  // anchored to the baseline, direct value + month labels since there
+  // are never more than 6 bars — no legend needed for a single series.
+  const W = 320, H = 118, padTop = 18, baseline = 88;
+  const maxCents = Math.max(1, ...buckets.map((b) => b.cents));
+  const slotW = W / buckets.length;
+  const barW = Math.min(40, slotW * 0.55);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Revenue by month">
+      <line x1={0} y1={baseline} x2={W} y2={baseline} stroke={T.line} strokeWidth={1} />
+      {buckets.map((b, i) => {
+        const barH = Math.max(3, (b.cents / maxCents) * (baseline - padTop));
+        const x = i * slotW + (slotW - barW) / 2;
+        const y = baseline - barH;
+        return (
+          <g key={b.label + i}>
+            <rect x={x} y={y} width={barW} height={barH} rx={4} ry={4} fill={T.accent} />
+            {barH > 6 && <rect x={x} y={baseline - 4} width={barW} height={4} fill={T.accent} />}
+            <text x={x + barW / 2} y={y - 4} textAnchor="middle" style={{ ...mono, fontSize: 9, fill: T.ashDim }}>
+              ${(b.cents / 100).toFixed(0)}
+            </text>
+            <text x={x + barW / 2} y={baseline + 14} textAnchor="middle" style={{ ...body, fontSize: 9, fill: T.ashFaint }}>
+              {b.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /* ---------- Analytics (top-level tab, real numbers only) ---------- */
-function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoading }) {
+function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoading, myFields }) {
   const published = events.filter((e) => !e.draft && !e.deleted);
   const totalInterest = published.reduce((sum, e) => sum + (e.interestCount || 0), 0);
   const totalBooked = published.reduce((sum, e) => sum + (e.bookedCount || 0), 0);
   const topEvents = [...published].filter((e) => e.interestCount > 0).sort((a, b) => (b.interestCount || 0) - (a.interestCount || 0)).slice(0, 5);
-  const { paidBookingsCount, revenueCents, statsLoading } = useOwnerBookingRevenue(published);
+  const { records, financialsLoading } = useOwnerFinancials(published);
+
+  const today = localDateStr();
+  const totalNetCents = records.reduce((sum, r) => sum + r.netCents, 0);
+  const pastNetCents = records.filter((r) => (r.eventDate || "") < today).reduce((sum, r) => sum + r.netCents, 0);
+  const upcomingNetCents = totalNetCents - pastNetCents;
+
+  // Revenue by month, bucketed on bookedAt (when the money actually came
+  // in, not when the event happens) — last 6 months present in the data,
+  // oldest first so the chart reads left-to-right chronologically.
+  const monthBuckets = (() => {
+    const byMonth = {};
+    records.forEach((r) => {
+      if (!r.bookedAt?.toDate) return;
+      const key = localDateStr(r.bookedAt.toDate()).slice(0, 7); // YYYY-MM
+      byMonth[key] = (byMonth[key] || 0) + r.netCents;
+    });
+    return Object.keys(byMonth).sort().slice(-6).map((key) => ({
+      label: new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: "short" }),
+      cents: byMonth[key],
+    }));
+  })();
+
+  // Revenue by event — ranked by actual dollars, not interest/signups
+  // (the existing "Most Interest" list below is signups, not money).
+  const eventRevenue = (() => {
+    const byEvent = {};
+    records.forEach((r) => {
+      if (!byEvent[r.eventId]) byEvent[r.eventId] = { id: r.eventId, title: r.eventTitle, cents: 0 };
+      byEvent[r.eventId].cents += r.netCents;
+    });
+    return Object.values(byEvent).sort((a, b) => b.cents - a.cents).slice(0, 5);
+  })();
+
+  // Revenue by field — only meaningful once an owner runs more than one,
+  // since Atlas Standard now allows unlimited fields per account.
+  const fieldRevenue = (() => {
+    const byField = {};
+    records.forEach((r) => {
+      const key = r.fieldId || "unknown";
+      if (!byField[key]) byField[key] = { id: key, name: r.fieldName || "Unknown field", cents: 0 };
+      byField[key].cents += r.netCents;
+    });
+    return Object.values(byField).sort((a, b) => b.cents - a.cents);
+  })();
+
+  const exportFinancialsCsv = () => downloadCsv(
+    "Atlas Financials.csv",
+    ["Event", "Field", "Event Date", "Booked At", "Amount Paid", "Atlas Fee", "Net"],
+    records.map((r) => [
+      r.eventTitle,
+      r.fieldName || "",
+      r.eventDate || "",
+      r.bookedAt?.toDate ? r.bookedAt.toDate().toLocaleString() : "",
+      `$${(r.amountPaidCents / 100).toFixed(2)}`,
+      `$${(r.bookingFeeCents / 100).toFixed(2)}`,
+      `$${(r.netCents / 100).toFixed(2)}`,
+    ])
+  );
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
@@ -2786,14 +2878,22 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
       </div>
 
       <div className="px-6">
-        {!statsLoading && paidBookingsCount > 0 && (
+        {!financialsLoading && records.length > 0 && (
           <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-            <div className="flex items-center gap-1.5 mb-1">
-              <TrendingUp size={13} color={T.ashFaint} />
-              <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Ticket Revenue (Real, Paid Bookings)</span>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1.5">
+                <TrendingUp size={13} color={T.ashFaint} />
+                <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Ticket Revenue (Real, Paid Bookings)</span>
+              </div>
+              <button onClick={exportFinancialsCsv} className="text-[11px] font-semibold" style={{ ...body, color: T.accent }}>Export CSV</button>
             </div>
-            <div className="text-[22px] font-semibold" style={{ ...display, color: T.accent }}>${(revenueCents / 100).toFixed(2)}</div>
-            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>{paidBookingsCount} paid booking{paidBookingsCount === 1 ? "" : "s"} — your share after Atlas's booking fee, already sent to your connected Stripe account</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.accent }}>${(totalNetCents / 100).toFixed(2)}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>${(pastNetCents / 100).toFixed(2)} already earned · ${(upcomingNetCents / 100).toFixed(2)} collected for upcoming events — your share after Atlas's booking fee, already sent to your connected Stripe account</div>
+            {monthBuckets.length > 0 && (
+              <div className="mt-3">
+                <RevenueBarChart buckets={monthBuckets} />
+              </div>
+            )}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 mb-5">
@@ -2814,6 +2914,30 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{activityLoading ? "…" : totalSignatures}</div>
           </div>
         </div>
+
+        {!financialsLoading && eventRevenue.length > 0 && (
+          <>
+            <Eyebrow>Revenue by Event</Eyebrow>
+            {eventRevenue.map((ev) => (
+              <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.title}</div>
+                <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>${(ev.cents / 100).toFixed(2)}</div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {!financialsLoading && myFields.length > 1 && fieldRevenue.length > 0 && (
+          <>
+            <Eyebrow>Revenue by Field</Eyebrow>
+            {fieldRevenue.map((f) => (
+              <div key={f.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{f.name}</div>
+                <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>${(f.cents / 100).toFixed(2)}</div>
+              </div>
+            ))}
+          </>
+        )}
 
         <Eyebrow>Most Interest</Eyebrow>
         {topEvents.length === 0 ? (
@@ -3874,6 +3998,7 @@ export default function App() {
           eventsLoading={allMyEventsLoading}
           totalSignatures={totalSignatures}
           activityLoading={activityLoading}
+          myFields={myFields}
         />
       );
     } else if (activeTab === "roster") {
