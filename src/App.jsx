@@ -501,7 +501,13 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState("");
 
-  const filtered = allFields.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
+  // Same exclusion the players app applies: a relocated, closed, or
+  // airsoft-less field has nothing an owner could legitimately claim —
+  // it either isn't the field's current home, doesn't exist as a business
+  // anymore, or was never really an airsoft venue to begin with.
+  const filtered = allFields
+    .filter((f) => !["relocated", "closed", "no-airsoft"].includes(f.status))
+    .filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
 
   const handleClaim = async (field) => {
     setClaimingId(field.id);
