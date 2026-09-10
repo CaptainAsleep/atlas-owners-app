@@ -30,6 +30,25 @@ const T = {
   accent: "#1554B8",
   good: "#0F7A52",
   alert: "#BC3327",
+
+  // --- Elevation & shape (added for the aesthetic-upgrade pass) ---
+  // Soft shadows replace the flat 1px border as the primary depth cue on
+  // cards; borders stay only for hairline dividers and secondary/outline
+  // buttons that need a visible edge with no fill.
+  shadowSm: "0 1px 2px rgba(0,44,72,0.05)",
+  shadowMd: "0 1px 2px rgba(0,44,72,0.05), 0 8px 20px -8px rgba(0,44,72,0.16)",
+  shadowLg: "0 1px 2px rgba(0,44,72,0.06), 0 10px 28px -8px rgba(0,44,72,0.22)",
+  shadowNav: "0 -8px 24px -8px rgba(0,44,72,0.14)", // bottom nav / sticky footer bars
+  // A single deliberate radius scale, replacing the mixed 2/4/6/8px values
+  // that had been picked ad hoc per element.
+  rTight: 10, // inputs, small chips
+  rCard: 16, // standard cards
+  rHero: 18, // feature/hero cards
+  rMedia: 14, // images inside cards
+  rPill: 999, // pills, segmented controls, toggle chips, primary buttons
+  // Soft tint washes for icon badges
+  tint: "#EEF2F8",
+  tintGood: "#EAF5EF",
 };
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
@@ -187,7 +206,7 @@ function TextField({ label, value, onChange, placeholder, type = "text", rows })
           ...body,
           background: T.panelAlt,
           border: `1px solid ${T.line}`,
-          borderRadius: 4,
+          borderRadius: T.rTight,
           color: T.ash,
           resize: rows ? "none" : undefined,
           colorScheme: "light",
@@ -226,8 +245,8 @@ function PrimaryButton({ children, onClick, disabled, tone = "ash" }) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className="w-full py-3 font-semibold text-[14px]"
-      style={{ ...display, background: T[tone], color: "#FFFFFF", borderRadius: 4, opacity: disabled ? 0.5 : 1 }}
+      className="w-full py-3.5 font-semibold text-[14px] transition-transform duration-100 active:scale-[0.98]"
+      style={{ ...display, background: T[tone], color: "#FFFFFF", borderRadius: T.rPill, opacity: disabled ? 0.5 : 1, boxShadow: disabled ? "none" : "0 8px 20px -6px rgba(0,44,72,0.4)" }}
     >
       {children}
     </button>
@@ -289,7 +308,7 @@ function LoginScreen({ signIn, signUp }) {
           type="submit"
           disabled={busy}
           className="w-full py-3.5 font-semibold text-[14px] flex items-center justify-center gap-2 mt-2"
-          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: busy ? 0.6 : 1 }}
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: busy ? 0.6 : 1 }}
         >
           {busy ? "Please wait…" : mode === "signup" ? "Create Account" : "Sign In"} <ArrowRight size={16} />
         </button>
@@ -327,7 +346,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
           <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>Welcome back,</div>
           <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>{profile?.name || "Owner"}</div>
         </div>
-        <button onClick={onLogout} className="w-9 h-9 flex items-center justify-center" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 4 }}>
+        <button onClick={onLogout} className="w-9 h-9 flex items-center justify-center" style={{ background: T.panel, borderRadius: T.rTight, boxShadow: T.shadowSm }}>
           <LogOut size={16} color={T.ashDim} />
         </button>
       </div>
@@ -352,7 +371,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
             <Eyebrow>Pending Review</Eyebrow>
             <div className="mb-5 flex flex-col gap-2">
               {pendingFields.map((f) => (
-                <div key={f.id} className="p-3 flex items-center gap-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.accent}` }}>
+                <div key={f.id} className="p-3 flex items-center gap-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, outline: `1.5px solid ${T.accent}`, outlineOffset: -1 }}>
                   <div className="flex-1">
                     <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
                     <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>Awaiting manual review — no website on file to verify against</div>
@@ -367,31 +386,28 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
           <>
             <Eyebrow>Overview</Eyebrow>
             <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Calendar size={13} color={T.ashFaint} />
-                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Upcoming</span>
+              <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="flex items-center justify-center mb-2.5" style={{ width: 30, height: 30, borderRadius: T.rPill, background: T.tint }}>
+                  <Calendar size={14} color={T.accent} />
                 </div>
-                <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : upcoming.length}</div>
+                <div className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Upcoming</div>
+                <div className="text-[24px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : upcoming.length}</div>
               </div>
-              <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <TrendingUp size={13} color={T.ashFaint} />
-                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</span>
+              <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="flex items-center justify-center mb-2.5" style={{ width: 30, height: 30, borderRadius: T.rPill, background: T.tintGood }}>
+                  <TrendingUp size={14} color={T.good} />
                 </div>
-                <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
+                <div className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</div>
+                <div className="text-[24px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
                 <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Players who favorited your events — not confirmed reservations</div>
               </div>
             </div>
 
             {!eventsLoading && totalProjectedRevenue > 0 && (
-              <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <TrendingUp size={13} color={T.ashFaint} />
-                  <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Projected Revenue (Gross, Upcoming)</span>
-                </div>
-                <div className="text-[22px] font-semibold" style={{ ...display, color: T.accent }}>${totalProjectedRevenue.toFixed(2)}</div>
-                <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Summed across every upcoming event at full capacity, across all your fields — not a real payment yet</div>
+              <div className="p-4 mb-5" style={{ borderRadius: T.rHero, background: "linear-gradient(135deg,#0e2c47,#1c3f63)", boxShadow: "0 10px 24px -8px rgba(0,44,72,0.35)" }}>
+                <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: "rgba(255,255,255,0.6)", letterSpacing: "0.04em" }}>Projected Revenue (Gross, Upcoming)</div>
+                <div className="text-[26px] font-semibold" style={{ ...display, color: "#fff" }}>${totalProjectedRevenue.toFixed(2)}</div>
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: "rgba(255,255,255,0.55)" }}>Summed across every upcoming event at full capacity, across all your fields — not a real payment yet</div>
               </div>
             )}
           </>
@@ -408,22 +424,27 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               <button onClick={onOpenEventsList} className="text-[11px] font-medium" style={{ ...body, color: T.accent }}>View All</button>
             </div>
             <div className="mb-5 flex flex-col gap-2">
-              {upcoming.slice(0, 3).map((ev) => (
-                <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3 flex items-center justify-between text-left" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
-                  <div>
-                    <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
-                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{ev.fieldName} — {ev.date}</div>
-                  </div>
-                  <div className="text-right">
-                    {typeof ev.maxCapacity === "number" && (
-                      <div className="text-[12px] font-semibold" style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity} reserved</div>
+              {upcoming.slice(0, 3).map((ev) => {
+                const pct = typeof ev.maxCapacity === "number" && ev.maxCapacity > 0
+                  ? Math.min(100, Math.round(((ev.bookedCount || 0) / ev.maxCapacity) * 100))
+                  : null;
+                return (
+                  <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3.5 text-left w-full" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                      {typeof ev.maxCapacity === "number" && (
+                        <div className="text-[12px] font-semibold" style={{ ...mono, color: T.good }}>{ev.bookedCount || 0} / {ev.maxCapacity}</div>
+                      )}
+                    </div>
+                    <div className="text-[11px] mb-2" style={{ ...body, color: T.ashFaint }}>{ev.fieldName} — {ev.date}{ev.interestCount > 0 ? ` · ${ev.interestCount} interested` : ""}</div>
+                    {pct !== null && (
+                      <div style={{ height: 5, borderRadius: T.rPill, background: T.panelAlt, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", borderRadius: T.rPill, background: T.good }} />
+                      </div>
                     )}
-                    {ev.interestCount > 0 && (
-                      <span className="text-[10px]" style={{ ...mono, color: T.ashFaint }}>{ev.interestCount} interested</span>
-                    )}
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -435,7 +456,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               {activity.map((a, i) => {
                 const ev = events.find((e) => e.id === a.eventId);
                 return (
-                  <div key={i} className="p-3 flex items-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+                  <div key={i} className="p-3 flex items-center gap-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                     <FileSignature size={14} color={T.good} />
                     <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
                       <span style={{ fontWeight: 600, color: T.ash }}>{a.signedName}</span> signed the waiver for {ev?.title || "an event"}
@@ -457,7 +478,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
         {myFieldsLoading ? (
           <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
         ) : myFields.length === 0 ? (
-          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <Shield size={22} color={T.ashDim} className="mb-2" />
             <div className="text-[14px] font-semibold mb-1" style={{ ...display, color: T.ash }}>No fields claimed yet</div>
             <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>Find your field and claim it to start managing events.</p>
@@ -469,7 +490,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               key={f.id}
               onClick={() => onOpenField(f.id)}
               className="w-full mb-3 p-4 flex items-center gap-3 text-left"
-              style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+              style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
             >
               <div className="flex-1">
                 <div className="text-[15px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
@@ -588,7 +609,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
             const isClaimed = f.claimed === true;
             const isPending = f.claimPending === true;
             return (
-              <div key={f.id} className="mb-3 p-4 flex items-center gap-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div key={f.id} className="mb-3 p-4 flex items-center gap-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="flex-1">
                   <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
                   <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
@@ -611,7 +632,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
                     onClick={() => handleClaim(f)}
                     disabled={claimingId === f.id}
                     className="px-3 py-2 text-[12px] font-semibold flex-shrink-0"
-                    style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: claimingId === f.id ? 0.6 : 1 }}
+                    style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: claimingId === f.id ? 0.6 : 1 }}
                   >
                     {claimingId === f.id ? "…" : "Claim"}
                   </button>
@@ -624,7 +645,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
 
       {verifyField && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4 sm:pb-0" style={{ background: "rgba(0,0,0,0.5)" }}>
-          <div className="w-full sm:max-w-md p-6" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+          <div className="w-full sm:max-w-md p-6" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <h2 className="text-[16px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Verify {verifyField.name}</h2>
             <p className="text-[12px] mb-3" style={{ ...body, color: T.ashFaint }}>
               Paste the code below anywhere on your site's homepage ({verifyWebsiteUrl || verifyField.website}), save it live, then come back and tap Verify. No manual review needed once it's found.
@@ -649,7 +670,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
                 onClick={handleVerifyWebsite}
                 disabled={verifyLoading || !verifyCode}
                 className="flex-1 px-3 py-2.5 text-[13px] font-semibold"
-                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: verifyLoading || !verifyCode ? 0.6 : 1 }}
+                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: verifyLoading || !verifyCode ? 0.6 : 1 }}
               >
                 {verifyLoading ? "Checking…" : "I've added it — Verify"}
               </button>
@@ -721,22 +742,22 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : upcoming.length}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Upcoming</div>
           </div>
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
           </div>
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
           </div>
         </div>
 
         {!eventsLoading && totalProjectedRevenue > 0 && (
-          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
               Projected Revenue (Gross, Upcoming): <span style={{ fontWeight: 600, color: T.accent }}>${totalProjectedRevenue.toFixed(2)}</span> — summed across this field's upcoming events at full capacity, not a real payment yet
             </div>
@@ -754,7 +775,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
         ) : (
           <div className="flex flex-col gap-2 mb-5">
             {upcoming.map((ev) => (
-              <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3 flex items-center justify-between text-left" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <button key={ev.id} onClick={() => onOpenEvent(ev)} className="p-3 flex items-center justify-between text-left" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div>
                   <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                   <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{ev.date}</div>
@@ -772,12 +793,12 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
               Real players earn this automatically after 3 real check-ins here — this QR is a special, faster way to hand it to someone in person.
             </p>
             {!showDtbQr ? (
-              <button onClick={handleShowDtbQr} className="w-full py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <button onClick={handleShowDtbQr} className="w-full py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <QrCode size={16} color={T.ashDim} />
                 <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Show DTB QR</span>
               </button>
             ) : (
-              <div className="p-4 flex flex-col items-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="p-4 flex flex-col items-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <button onClick={() => setShowDtbQr(false)} className="self-end -mt-1 -mr-1 w-7 h-7 flex items-center justify-center">
                   <X size={16} color={T.ashFaint} />
                 </button>
@@ -1159,7 +1180,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
           <button onClick={addRental} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Add Item</button>
         </div>
         {rentals.map((r, i) => (
-          <div key={i} className="mb-3 p-3" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+          <div key={i} className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex gap-2 mb-2">
               <input value={r.name} onChange={(e) => updateRental(i, "name", e.target.value)} placeholder="Item name"
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
@@ -1184,7 +1205,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
           Save a waiver here once, then pick it from a list when creating an event instead of retyping it every time.
         </p>
         {savedWaivers.map((w, i) => (
-          <div key={i} className="mb-3 p-3" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+          <div key={i} className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex gap-2 mb-2">
               <input value={w.name} onChange={(e) => updateSavedWaiver(i, "name", e.target.value)} placeholder="e.g. Standard Waiver, MilSim Waiver"
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
@@ -1254,11 +1275,11 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
       <div className="px-6 pt-4">
         <div className="flex items-center gap-2 mb-1">
           {ev.canceled ? (
-            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: 2 }}>CANCELED</span>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: T.rPill }}>CANCELED</span>
           ) : ev.draft ? (
-            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>DRAFT</span>
           ) : (
-            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: T.rPill }}>PUBLISHED</span>
           )}
         </div>
         <div className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>{ev.title}</div>
@@ -1267,15 +1288,15 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{ev.bookedCount || 0}{typeof ev.maxCapacity === "number" ? `/${ev.maxCapacity}` : ""}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
           </div>
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.interestCount || 0}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
           </div>
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.price ? displayPrice(ev.price) : "—"}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Price</div>
           </div>
@@ -1286,7 +1307,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           // card below refers to this block — it used to point at nothing,
           // since the overview screen never actually rendered the choices
           // an owner set up in the event editor.
-          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>
               Price Options{ev.priceOptions.required ? "" : " (Optional)"}
             </div>
@@ -1310,7 +1331,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           // number, rather than guessing at a range.
           if (ev.priceOptions?.choices?.length) {
             return (
-              <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
                   Projected Revenue: <span style={{ fontWeight: 600, color: T.accent }}>Price varies</span> — depends on what players choose, see Price Options above
                 </div>
@@ -1321,7 +1342,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           const cap = typeof ev.maxCapacity === "number" ? ev.maxCapacity : parseInt(ev.maxCapacity, 10);
           if (!p || !cap) return null;
           return (
-            <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
               <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>
                 Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${(p * cap).toFixed(2)}</span> — entry cost × capacity, not a real payment yet
               </div>
@@ -1329,7 +1350,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           );
         })()}
 
-        <button onClick={() => onOpenRoster(ev)} className="w-full mb-5 py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+        <button onClick={() => onOpenRoster(ev)} className="w-full mb-5 py-3 flex items-center justify-center gap-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
           <Users size={15} color={T.ashDim} />
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>View Full Roster</span>
         </button>
@@ -1344,7 +1365,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         {ev.checkInPatch?.imageUrl && (
           <>
             <Eyebrow>Check-In Reward Patch</Eyebrow>
-            <div className="p-3 flex items-center gap-3 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="p-3 flex items-center gap-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
               <img src={ev.checkInPatch.imageUrl} alt="" className="w-10 h-10" style={{ objectFit: "contain" }} />
               <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.checkInPatch.name}</div>
             </div>
@@ -1354,7 +1375,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         {ev.waiver && (
           <>
             <Eyebrow>Waiver</Eyebrow>
-            <div className="p-3 flex items-center gap-2 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div className="p-3 flex items-center gap-2 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
               <FileSignature size={15} color={T.ashDim} />
               <span className="text-[13px]" style={{ ...body, color: T.ashDim }}>Required for this event</span>
             </div>
@@ -1736,7 +1757,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           </>
         )}
         {priceOptionsChoices.map((c, i) => (
-          <div key={c.id} className="mb-3 p-3" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6 }}>
+          <div key={c.id} className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex gap-2">
               <input value={c.label} onChange={(e) => updatePriceChoice(i, "label", e.target.value)} placeholder="e.g. AR, LMG, .25g BBs"
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
@@ -1906,7 +1927,7 @@ function LegalAgreementScreen({ onAccept }) {
           onClick={handleAccept}
           disabled={!checked || saving}
           className="w-full py-3.5 font-semibold text-[14px]"
-          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: !checked || saving ? 0.5 : 1 }}
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: !checked || saving ? 0.5 : 1 }}
         >
           {saving ? "Continuing…" : "Agree & Continue"}
         </button>
@@ -2087,17 +2108,17 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <div className="flex items-center gap-2 flex-wrap">
             <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{name}</div>
             {checkedIn && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: T.rPill }}>
                 <Check size={9} /> CHECKED IN
               </span>
             )}
             {matchingBooking?.paid && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.accent, border: `1px solid ${T.accent}`, borderRadius: 2 }}>
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.accent, border: `1px solid ${T.accent}`, borderRadius: T.rPill }}>
                 PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
               </span>
             )}
             {matchingBooking?.selectedChoiceLabel && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: 2 }}>
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
                 {matchingBooking.selectedChoiceLabel}
               </span>
             )}
@@ -2146,7 +2167,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         </div>
 
         {typeof event.maxCapacity === "number" ? (
-          <div className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="mb-2 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex items-baseline justify-between mb-1.5">
               <span className="text-[20px] font-semibold" style={{ ...display, color: T.good }}>{event.bookedCount || 0}</span>
               <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} reserved</span>
@@ -2296,7 +2317,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               There's no enforcement mechanism yet (that needs real check-in), but this list is saved and ready for when there is.
             </p>
             {banned.map((b) => (
-              <div key={b.uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div key={b.uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{b.name}</div>
                 <button
                   onClick={() => unbanPlayer(event.fieldId, b.uid)}
@@ -2399,7 +2420,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
             <p className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>No reserved player matches that name.</p>
           ) : (
             matches.map((b) => (
-              <div key={b.uid} className="mb-2 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div key={b.uid} className="mb-2 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="flex items-center justify-between mb-1">
                   <div>
                     <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{nameByUid.get(b.uid) || b.callsign}</div>
@@ -2408,7 +2429,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                     )}
                   </div>
                   {b.checkedIn ? (
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 flex items-center gap-1" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: T.rPill }}>
                       <Check size={9} /> CHECKED IN
                     </span>
                   ) : (
@@ -2416,7 +2437,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                       onClick={() => handleCheckIn(b)}
                       disabled={busyUid === b.uid}
                       className="px-3 py-1.5 text-[11px] font-semibold"
-                      style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: busyUid === b.uid ? 0.6 : 1 }}
+                      style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: busyUid === b.uid ? 0.6 : 1 }}
                     >
                       {busyUid === b.uid ? "…" : "Check In"}
                     </button>
@@ -2454,14 +2475,16 @@ function OwnerBottomNav({ active, onNavigate }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
   return (
-    <div className="absolute bottom-0 left-0 right-0 border-t" style={{ background: T.panel, borderColor: T.line, zIndex: 1000 }}>
+    <div className="absolute bottom-0 left-0 right-0" style={{ background: T.panel, boxShadow: T.shadowNav, zIndex: 1000 }}>
       <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 20 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = active === t.key;
           return (
-            <button key={t.key} onClick={() => onNavigate(t.key)} className="flex flex-col items-center gap-1 flex-1">
-              <Icon size={19} color={isActive ? T.accent : T.ashDim} strokeWidth={1.7} />
+            <button key={t.key} onClick={() => onNavigate(t.key)} className="flex flex-col items-center gap-1 flex-1 transition-transform duration-100 active:scale-90">
+              <div className="flex items-center justify-center" style={{ width: 38, height: 26, borderRadius: T.rPill, background: isActive ? T.tint : "transparent" }}>
+                <Icon size={18} color={isActive ? T.accent : T.ashDim} strokeWidth={1.7} />
+              </div>
               <span className="text-[9px] font-medium" style={{ ...body, color: isActive ? T.accent : T.ashDim }}>{t.label}</span>
             </button>
           );
@@ -2550,7 +2573,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
 
       <div className="px-6">
         {myFields.length === 0 ? (
-          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <Calendar size={22} color={T.ashDim} className="mb-2" />
             <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>Claim a field first</div>
             <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>You'll need a field before you can create events.</p>
@@ -2607,18 +2630,18 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           <div className="text-[13px] py-6 text-center" style={{ ...body, color: T.ashFaint }}>Nothing here yet.</div>
         ) : (
           filtered.map((ev) => (
-            <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
               <button onClick={() => onOpenOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="w-full text-left">
                 <div className="flex items-start justify-between mb-1">
                   <div className="flex items-center gap-2">
                     {ev.deleted ? (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.ashFaint}`, borderRadius: 2 }}>DELETED</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.ashFaint}`, borderRadius: T.rPill }}>DELETED</span>
                     ) : ev.canceled ? (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: 2 }}>CANCELED</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: T.rPill }}>CANCELED</span>
                     ) : ev.draft ? (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 2 }}>DRAFT</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>DRAFT</span>
                     ) : (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>PUBLISHED</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: T.rPill }}>PUBLISHED</span>
                     )}
                     <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                   </div>
@@ -2647,18 +2670,18 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                   <Copy size={12} />
                 </button>
                 {ev.deleted ? (
-                  <button onClick={() => restoreEvent(ev.id)} className="px-3 py-2 text-[12px] font-semibold flex items-center gap-1" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                  <button onClick={() => restoreEvent(ev.id)} className="px-3 py-2 text-[12px] font-semibold flex items-center gap-1" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm }}>
                     <RotateCcw size={12} /> Restore
                   </button>
                 ) : (
                   <>
                     {ev.draft && (
-                      <button onClick={() => setConfirmPublish(ev)} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                      <button onClick={() => setConfirmPublish(ev)} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm }}>
                         Publish
                       </button>
                     )}
                     {ev.canceled && (
-                      <button onClick={() => updateEvent(ev.id, { canceled: false, canceledAt: null })} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4 }}>
+                      <button onClick={() => updateEvent(ev.id, { canceled: false, canceledAt: null })} className="px-3 py-2 text-[12px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm }}>
                         Reactivate
                       </button>
                     )}
@@ -2689,7 +2712,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                 Never mind
               </button>
-              <button onClick={handleConfirmCancel} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+              <button onClick={handleConfirmCancel} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
                 {busy ? "Canceling…" : "Cancel Event"}
               </button>
             </div>
@@ -2708,7 +2731,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <button onClick={() => setConfirmDelete(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                 Cancel
               </button>
-              <button onClick={handleConfirmDelete} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+              <button onClick={handleConfirmDelete} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
                 {busy ? "Deleting…" : "Delete Event"}
               </button>
             </div>
@@ -2727,7 +2750,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               <button onClick={() => setConfirmPublish(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
                 Cancel
               </button>
-              <button onClick={handleConfirmPublish} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: 4, opacity: busy ? 0.6 : 1 }}>
+              <button onClick={handleConfirmPublish} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
                 {busy ? "Publishing…" : "Publish"}
               </button>
             </div>
@@ -2761,7 +2784,7 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
               key={ev.id}
               onClick={() => onOpenRoster(ev)}
               className="w-full mb-3 p-4 flex items-center justify-between text-left"
-              style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+              style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
             >
               <div>
                 <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
@@ -2885,7 +2908,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 
       <div className="px-6">
         {!financialsLoading && records.length > 0 && (
-          <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1.5">
                 <TrendingUp size={13} color={T.ashFaint} />
@@ -2903,19 +2926,19 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Published Events</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : published.length}</div>
           </div>
-          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Reserved</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.good }}>{eventsLoading ? "…" : totalBooked}</div>
           </div>
-          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Total Interest</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{eventsLoading ? "…" : totalInterest}</div>
           </div>
-          <div className="p-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Waiver Signatures</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{activityLoading ? "…" : totalSignatures}</div>
           </div>
@@ -2925,7 +2948,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
           <>
             <Eyebrow>Revenue by Event</Eyebrow>
             {eventRevenue.map((ev) => (
-              <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.title}</div>
                 <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>${(ev.cents / 100).toFixed(2)}</div>
               </div>
@@ -2937,7 +2960,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
           <>
             <Eyebrow>Revenue by Field</Eyebrow>
             {fieldRevenue.map((f) => (
-              <div key={f.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+              <div key={f.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{f.name}</div>
                 <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>${(f.cents / 100).toFixed(2)}</div>
               </div>
@@ -2950,7 +2973,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
           <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>No interest data yet.</div>
         ) : (
           topEvents.map((ev) => (
-            <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+            <div key={ev.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
               <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{ev.title}</div>
               <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{ev.interestCount} interested</div>
             </div>
@@ -3022,8 +3045,8 @@ function FeeModelScreen({ profile, user, onBack }) {
       <div className="h-full overflow-y-auto pb-24" style={flatBg}>
         {header}
         <div className="px-6 pt-6">
-          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.good}` }}>
-            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: 2 }}>LOCKED IN</span>
+          <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, outline: `1.5px solid ${T.good}`, outlineOffset: -1 }}>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: T.good, border: `1px solid ${T.good}`, borderRadius: T.rPill }}>LOCKED IN</span>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>
               {isAbsorb ? "Absorb Fee as Field" : "Pass Fee to Player"}
             </div>
@@ -3052,8 +3075,8 @@ function FeeModelScreen({ profile, user, onBack }) {
           Atlas costs $0/month, always. Every ticket carries a small platform fee (3.5% + $1.30, capped at $5.00) — you choose who pays it.
         </p>
         <div className="flex flex-col gap-3">
-          <div className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
-            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: "#FFFFFF", background: T.accent, borderRadius: 2 }}>DEFAULT</span>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <span className="text-[9px] font-semibold px-1.5 py-0.5 mb-2 inline-block" style={{ ...mono, color: "#FFFFFF", background: T.accent, borderRadius: T.rPill }}>DEFAULT</span>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Pass Fee to Player</div>
             <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>The fee is added at checkout. You keep 100% of your listed ticket price.</p>
             <div className="p-3 mb-3" style={{ background: T.panelAlt, borderRadius: 6 }}>
@@ -3064,7 +3087,7 @@ function FeeModelScreen({ profile, user, onBack }) {
               {savingOption === "pass_to_player" ? "Saving…" : "Choose This Option"}
             </PrimaryButton>
           </div>
-          <div className="p-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Absorb Fee as Field</div>
             <p className="text-[11px] mb-3" style={{ ...body, color: T.ashDim }}>Players pay your exact listed price, with zero added fees at checkout. The fee comes out of your payout instead.</p>
             <div className="p-3 mb-3" style={{ background: T.panelAlt, borderRadius: 6 }}>
@@ -3185,7 +3208,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
     <div className="h-full overflow-y-auto" style={flatBg}>
       {header}
       <div className="px-6 pt-8">
-        <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: 8, border: `1px solid ${T.line}` }}>
+        <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
           <div className="text-[14px] font-semibold mb-2" style={{ ...display, color: T.ash }}>
             {alreadyStarted ? "Finish setting up payouts" : "Set up payouts"}
           </div>
@@ -3205,7 +3228,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
             onClick={handleSetUpPayouts}
             disabled={loading}
             className="w-full py-3 text-[13px] font-semibold"
-            style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: loading ? 0.6 : 1 }}
+            style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: loading ? 0.6 : 1 }}
           >
             {loading ? "Opening Stripe…" : alreadyStarted ? "Continue Setup" : "Set Up Payouts"}
           </button>
@@ -3338,7 +3361,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <button
           onClick={onOpenBilling}
           className="w-full mb-3 p-4 flex items-center justify-between"
-          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
         >
           <div className="text-left">
             <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>
@@ -3368,7 +3391,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <button
           onClick={() => { setShowPasswordForm(!showPasswordForm); setPasswordError(""); setPasswordSuccess(false); }}
           className="w-full flex items-center justify-between py-3 px-4 mb-2"
-          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
         >
           <span className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>Change Password</span>
           <ChevronRight size={15} color={T.ashFaint} style={{ transform: showPasswordForm ? "rotate(90deg)" : "none" }} />
@@ -3408,7 +3431,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
               type="submit"
               disabled={passwordSaving || !currentPassword || !newPassword}
               className="w-full py-3 font-semibold text-[14px]"
-              style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: passwordSaving || !currentPassword || !newPassword ? 0.6 : 1 }}
+              style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: passwordSaving || !currentPassword || !newPassword ? 0.6 : 1 }}
             >
               {passwordSaving ? "Updating…" : "Update Password"}
             </button>
@@ -3421,7 +3444,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <button
           onClick={() => setShowLegal(true)}
           className="w-full mb-6 p-4 flex items-center justify-between"
-          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
         >
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Terms, Privacy & EULA</span>
           <ChevronRight size={16} color={T.ashFaint} />
@@ -3433,7 +3456,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           target="_blank"
           rel="noreferrer"
           className="w-full mb-6 p-4 flex items-center justify-between"
-          style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}`, textDecoration: "none" }}
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, textDecoration: "none" }}
         >
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Get help on Discord</span>
           <ChevronRight size={16} color={T.ashFaint} />
@@ -3477,7 +3500,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
                 onClick={submitDelete}
                 disabled={deleting || !deletePassword}
                 className="flex-1 py-2.5 text-[12px] font-semibold"
-                style={{ ...display, background: T.alert, color: "#FFFFFF", borderRadius: 4, opacity: deleting || !deletePassword ? 0.6 : 1 }}
+                style={{ ...display, background: T.alert, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: deleting || !deletePassword ? 0.6 : 1 }}
               >
                 {deleting ? "Deleting…" : "Delete Permanently"}
               </button>
@@ -3543,11 +3566,11 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 
       {platform === "ios" ? (
         <div className="w-full text-left" style={{ maxWidth: 320 }}>
-          <div className="flex items-center gap-3 mb-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center gap-3 mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>1</span>
             <span className="text-[13px]" style={{ ...body, color: T.ash }}>Tap the Share button in Safari's toolbar</span>
           </div>
-          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>2</span>
             <span className="text-[13px]" style={{ ...body, color: T.ash }}>Scroll down and tap "Add to Home Screen"</span>
           </div>
@@ -3557,13 +3580,13 @@ function InstallGateScreen({ platform, deferredPrompt }) {
           onClick={handleInstallClick}
           disabled={installing}
           className="w-full py-3.5 font-semibold text-[14px]"
-          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, maxWidth: 320, opacity: installing ? 0.6 : 1 }}
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, maxWidth: 320, opacity: installing ? 0.6 : 1 }}
         >
           {installing ? "Opening…" : "Install Atlas Owners"}
         </button>
       ) : (
         <div className="w-full text-left" style={{ maxWidth: 320 }}>
-          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>1</span>
             <span className="text-[13px]" style={{ ...body, color: T.ash }}>Open your browser's menu and tap "Add to Home Screen" or "Install App"</span>
           </div>
@@ -3653,7 +3676,7 @@ function PayoutCelebrationModal({ event, revenueCents, payoutSchedule, onDismiss
           onClick={handleDismiss}
           disabled={dismissing}
           className="w-full py-2.5 text-[13px] font-semibold"
-          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: 4, opacity: dismissing ? 0.6 : 1 }}
+          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: dismissing ? 0.6 : 1 }}
         >
           {dismissing ? "\u2026" : "Nice!"}
         </button>
