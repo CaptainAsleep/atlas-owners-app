@@ -662,7 +662,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
               <button
                 onClick={() => setVerifyField(null)}
                 className="flex-1 px-3 py-2.5 text-[13px] font-semibold"
-                style={{ ...display, background: "transparent", color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: 4 }}
+                style={{ ...display, background: "transparent", color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: T.rPill }}
               >
                 Cancel
               </button>
@@ -1133,7 +1133,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
             className="flex-1 px-3 py-2 text-[12px] bg-transparent outline-none"
             style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
           />
-          <button onClick={addCustomAmenity} className="px-3 py-2 text-[12px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+          <button onClick={addCustomAmenity} className="px-3 py-2 text-[12px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
             Add
           </button>
         </div>
@@ -1186,7 +1186,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
               <input value={r.price} onChange={(e) => updateRental(i, "price", e.target.value)} placeholder="$30"
                 className="w-20 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
-              <button onClick={() => removeRental(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 4 }}>
+              <button onClick={() => removeRental(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
                 <Trash2 size={14} color={T.alert} />
               </button>
             </div>
@@ -1209,7 +1209,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
             <div className="flex gap-2 mb-2">
               <input value={w.name} onChange={(e) => updateSavedWaiver(i, "name", e.target.value)} placeholder="e.g. Standard Waiver, MilSim Waiver"
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
-              <button onClick={() => removeSavedWaiver(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 4 }}>
+              <button onClick={() => removeSavedWaiver(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
                 <Trash2 size={14} color={T.alert} />
               </button>
             </div>
@@ -1712,7 +1712,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
                 key={t.key}
                 onClick={() => setType(t.key)}
                 className="px-3 py-1.5 text-[12px] font-medium"
-                style={{ ...body, border: `1px solid ${type === t.key ? T.accent : T.line}`, background: type === t.key ? T.accent : "transparent", color: type === t.key ? "#fff" : T.ashDim, borderRadius: 4 }}
+                style={{ ...body, border: `1px solid ${type === t.key ? T.accent : T.line}`, background: type === t.key ? T.accent : "transparent", color: type === t.key ? "#fff" : T.ashDim, borderRadius: T.rPill }}
               >
                 {t.label}
               </button>
@@ -1763,7 +1763,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
                 className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
               <input value={c.price} onChange={(e) => updatePriceChoice(i, "price", e.target.value)} placeholder="$20"
                 className="w-20 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
-              <button onClick={() => removePriceChoice(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 4 }}>
+              <button onClick={() => removePriceChoice(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
                 <Trash2 size={14} color={T.alert} />
               </button>
             </div>
@@ -1833,7 +1833,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             onClick={() => handleSave(true)}
             disabled={saving || !hasChanges}
             className="w-full py-3 font-semibold text-[14px]"
-            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4, opacity: saving || !hasChanges ? 0.5 : 1 }}
+            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill, opacity: saving || !hasChanges ? 0.5 : 1 }}
           >
             Save as Draft
           </button>
@@ -2131,11 +2131,11 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           )}
         </div>
         {isBanned ? (
-          <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+          <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
             Unban
           </button>
         ) : (
-          <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+          <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}>
             Ban
           </button>
         )}
@@ -2160,7 +2160,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <button
             onClick={() => setShowManualCheckIn(true)}
             className="px-4 py-3 text-[13px] font-semibold flex items-center gap-2"
-            style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4 }}
+            style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: T.rPill }}
           >
             <Search size={15} /> Manual
           </button>
@@ -2322,7 +2322,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                 <button
                   onClick={() => unbanPlayer(event.fieldId, b.uid)}
                   className="px-2.5 py-1.5 text-[11px] font-semibold"
-                  style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}
+                  style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}
                 >
                   Unban
                 </button>
@@ -2587,7 +2587,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                     key={f.id}
                     onClick={() => setPickerFieldId(f.id)}
                     className="px-3 py-1.5 text-[12px] font-medium"
-                    style={{ ...body, border: `1px solid ${pickerFieldId === f.id ? T.accent : T.line}`, background: pickerFieldId === f.id ? T.accent : "transparent", color: pickerFieldId === f.id ? "#fff" : T.ashDim, borderRadius: 4 }}
+                    style={{ ...body, border: `1px solid ${pickerFieldId === f.id ? T.accent : T.line}`, background: pickerFieldId === f.id ? T.accent : "transparent", color: pickerFieldId === f.id ? "#fff" : T.ashDim, borderRadius: T.rPill }}
                   >
                     {f.name}
                   </button>
@@ -2660,13 +2660,13 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 )}
               </button>
               <div className="flex gap-2 flex-wrap">
-                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                   <Pencil size={14} />
                 </button>
-                <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                   <Users size={12} /> Roster
                 </button>
-                <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                <button onClick={() => handleDuplicate(ev)} className="px-3 py-2 text-[12px] font-medium flex items-center gap-1" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                   <Copy size={12} />
                 </button>
                 {ev.deleted ? (
@@ -2686,11 +2686,11 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                       </button>
                     )}
                     {!ev.draft && !ev.canceled && (
-                      <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+                      <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                         <Ban size={14} />
                       </button>
                     )}
-                    <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}>
+                    <button onClick={() => setConfirmDelete(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}>
                       <Trash2 size={14} />
                     </button>
                   </>
@@ -2709,7 +2709,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. This keeps the real record, unlike delete, and can be reversed by editing the event again.
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+              <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Never mind
               </button>
               <button onClick={handleConfirmCancel} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
@@ -2728,7 +2728,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               "{confirmDelete.title}" will move to the Deleted tab — bookings, revenue, and waiver history stay intact, and you can restore it later if this was a mistake.
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setConfirmDelete(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+              <button onClick={() => setConfirmDelete(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Cancel
               </button>
               <button onClick={handleConfirmDelete} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
@@ -2747,7 +2747,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
               "{confirmPublish.title}" will become visible to players immediately.
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setConfirmPublish(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+              <button onClick={() => setConfirmPublish(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Cancel
               </button>
               <button onClick={handleConfirmPublish} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
@@ -3098,7 +3098,7 @@ function FeeModelScreen({ profile, user, onBack }) {
               onClick={() => handleChoose("absorb")}
               disabled={savingOption !== null}
               className="w-full py-2.5 text-[13px] font-semibold"
-              style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: 4, opacity: savingOption !== null && savingOption !== "absorb" ? 0.5 : 1 }}
+              style={{ ...display, border: `1px solid ${T.line}`, color: T.ash, borderRadius: T.rPill, opacity: savingOption !== null && savingOption !== "absorb" ? 0.5 : 1 }}
             >
               {savingOption === "absorb" ? "Saving…" : "Choose This Option"}
             </button>
@@ -3466,7 +3466,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <button
             onClick={onLogout}
             className="w-full py-3 font-medium text-[14px] flex items-center justify-center gap-2"
-            style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: 4 }}
+            style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}
           >
             <LogOut size={15} /> Log Out
           </button>
@@ -3493,7 +3493,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
             />
             {deleteError && <p className="text-[11px] mb-2" style={{ ...body, color: T.alert }}>{deleteError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => { setShowDelete(false); setDeletePassword(""); setDeleteError(""); }} className="flex-1 py-2.5 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: 4 }}>
+              <button onClick={() => { setShowDelete(false); setDeletePassword(""); setDeleteError(""); }} className="flex-1 py-2.5 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Cancel
               </button>
               <button
