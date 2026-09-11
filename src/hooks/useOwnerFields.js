@@ -108,7 +108,7 @@ export function useFieldActions() {
   //    is a low-risk default, not a security hole.
   // Returns "claimed", "verify-website", or "claimed-unverified" so the UI
   // can show the right next step.
-  async function claimField(field, ownerEmail, ownerId) {
+  async function claimField(field, ownerEmail, ownerId, hasNameCollision = false) {
     // No field-count cap anymore (Atlas Standard has no subscription
     // tiers to key one off of — see firestore.rules and functions/index.js
     // for the matching removal).
@@ -133,6 +133,25 @@ export function useFieldActions() {
     }
     if (field.website) {
       return "verify-website";
+    }
+    if (!field.ownerEmailDomain && hasNameCollision) {
+      // This field's name collides with another field elsewhere (e.g. two
+      // states with a field of the same name) and there's no website or
+      // domain on file to automatically verify against — rather than
+      // instantly granting an unverified claim on a name that could
+      // plausibly mean "the wrong location," file a pending request
+      // instead. This maps onto the existing "Path 2" rule in
+      // firestore.rules (claimPending/claimRequestedBy), which already
+      // supports exactly this — it just had no caller until now. Resolved
+      // by hand today via the admin portal's Approve/Reject buttons.
+      const batch = writeBatch(db);
+      batch.update(doc(db, "fields", field.id), {
+        claimPending: true,
+        claimRequestedBy: ownerId,
+        claimRequestedByEmail: ownerEmail,
+      });
+      await batch.commit();
+      return "pending";
     }
     const batch = writeBatch(db);
     batch.update(doc(db, "fields", field.id), {

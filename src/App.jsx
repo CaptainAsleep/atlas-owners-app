@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
@@ -505,6 +505,18 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
   );
 }
 
+// Lowercase, trim, and collapse punctuation/whitespace so "Black Ops
+// Paintball & Airsoft" and a differently-punctuated variant would be
+// treated the same — used only to flag same-name-different-location
+// collisions in the claim flow, not for search or display.
+function normalizeFieldName(name) {
+  return (name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 /* ---------- Claim a field ---------- */
 function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, requestClaimCode, verifyWebsiteClaim, onClaimed }) {
   const [search, setSearch] = useState("");
@@ -526,18 +538,34 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   // airsoft-less field has nothing an owner could legitimately claim —
   // it either isn't the field's current home, doesn't exist as a business
   // anymore, or was never really an airsoft venue to begin with.
+  const nameCounts = useMemo(() => {
+    const counts = {};
+    for (const f of allFields) {
+      const key = normalizeFieldName(f.name);
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [allFields]);
+
   const filtered = allFields
     .filter((f) => !["relocated", "closed", "no-airsoft"].includes(f.status))
-    .filter((f) => f.name.toLowerCase().includes(search.toLowerCase()));
+    .filter((f) => {
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
+      return f.name.toLowerCase().includes(q) || (f.city || "").toLowerCase().includes(q);
+    });
 
   const handleClaim = async (field) => {
     setClaimingId(field.id);
     setError("");
     setPendingMsg("");
     try {
-      const result = await claimField(field, ownerEmail, ownerId);
+      const hasCollision = nameCounts[normalizeFieldName(field.name)] > 1;
+      const result = await claimField(field, ownerEmail, ownerId, hasCollision);
       if (result === "claimed" || result === "claimed-unverified") {
         onClaimed(field.id);
+      } else if (result === "pending") {
+        setPendingMsg("This field's name matches another listing elsewhere, so we're holding your claim for a quick check before it's activated.");
       } else if (result === "verify-website") {
         setVerifyError("");
         setVerifyCode("");
@@ -593,7 +621,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by field name"
+            placeholder="Search by field name or city"
             className="flex-1 text-[13px] bg-transparent outline-none"
             style={{ ...body, color: T.ash }}
           />
@@ -613,12 +641,19 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
                 <div className="flex-1">
                   <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
                   <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
+                  {nameCounts[normalizeFieldName(f.name)] > 1 && !isClaimed && !isPending && (
+                    <div className="text-[10px] mt-0.5" style={{ ...body, color: T.alert }}>
+                      Another field elsewhere is also named "{f.name}" — double check this is {f.city}.
+                    </div>
+                  )}
                   {!isClaimed && !isPending && (
                     <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>
                       {f.ownerEmailDomain
                         ? `Verified instantly with an @${f.ownerEmailDomain} email${f.website ? " — or verify your site instead if that's not your address" : ""}`
                         : f.website
                         ? "No matching email on file — verify instantly by proving you control the field's website"
+                        : nameCounts[normalizeFieldName(f.name)] > 1
+                        ? "No website on file and the name matches another listing — claim will be held for a quick manual check"
                         : "No website on file — claims instantly, flagged for review if ever disputed"}
                     </div>
                   )}
