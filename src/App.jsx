@@ -44,6 +44,7 @@ const T = {
   rTight: 10, // inputs, small chips
   rCard: 16, // standard cards
   rHero: 18, // feature/hero cards
+  rFloat: 24, // floating detached bars (booking bar / sticky footer)
   rMedia: 14, // images inside cards
   rPill: 999, // pills, segmented controls, toggle chips, primary buttons
   // Soft tint washes for icon badges
@@ -2510,8 +2511,8 @@ function OwnerBottomNav({ active, onNavigate }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
   return (
-    <div className="absolute bottom-0 left-0 right-0" style={{ background: T.panel, boxShadow: T.shadowNav, zIndex: 1000 }}>
-      <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 20 }}>
+    <div className="absolute bottom-4 left-4 right-4" style={{ background: T.panel, borderRadius: T.rPill, boxShadow: T.shadowFloat, zIndex: 1000 }}>
+      <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 12 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = active === t.key;
