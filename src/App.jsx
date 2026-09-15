@@ -39,6 +39,10 @@ const T = {
   shadowMd: "0 1px 2px rgba(0,44,72,0.05), 0 8px 20px -8px rgba(0,44,72,0.16)",
   shadowLg: "0 1px 2px rgba(0,44,72,0.06), 0 10px 28px -8px rgba(0,44,72,0.22)",
   shadowNav: "0 -8px 24px -8px rgba(0,44,72,0.14)", // bottom nav / sticky footer bars
+  shadowFloat: "0 6px 14px rgba(0,44,72,0.16), 0 24px 48px -12px rgba(0,44,72,0.40)", // detached/floating bars (nav, booking bar)
+  glassFill: "rgba(255,255,255,0.72)", // translucent fill for floating glass bars
+  glassBlur: "blur(20px)", // backdrop blur amount for floating glass bars
+  glassBorder: "1px solid rgba(255,255,255,0.6)", // edge highlight for floating glass bars
   // A single deliberate radius scale, replacing the mixed 2/4/6/8px values
   // that had been picked ad hoc per element.
   rTight: 10, // inputs, small chips
@@ -2511,7 +2515,7 @@ function OwnerBottomNav({ active, onNavigate }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
   return (
-    <div className="absolute bottom-4 left-4 right-4" style={{ background: T.panel, borderRadius: T.rPill, boxShadow: T.shadowFloat, zIndex: 1000 }}>
+    <div className="absolute bottom-4 left-4 right-4" style={{ background: T.glassFill, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: T.glassBorder, borderRadius: T.rPill, boxShadow: T.shadowFloat, zIndex: 1000 }}>
       <div className="flex justify-between px-3 pt-2.5" style={{ paddingBottom: 12 }}>
         {tabs.map((t) => {
           const Icon = t.icon;
