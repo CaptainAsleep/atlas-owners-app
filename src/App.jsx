@@ -2542,6 +2542,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmPublish, setConfirmPublish] = useState(null);
   const [confirmCancel, setConfirmCancel] = useState(null);
+  const [cancelError, setCancelError] = useState("");
   const [busy, setBusy] = useState(false);
   const today = localDateStr();
 
@@ -2585,11 +2586,24 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   // waiver signatures, and history all stay intact), just marks it as no
   // longer actually happening. Players who booked or favorited it see a
   // real "canceled" state instead of the event just quietly vanishing.
+  //
+  // Routed through the cancelEventWithVouchers Cloud Function rather than
+  // a plain updateEvent — canceling isn't just a flag flip anymore: any
+  // player who already paid needs a real voucher issued (not a Stripe
+  // refund — see cancelEventWithVouchers for why), and everyone who
+  // reserved needs an in-app notice, both of which have to happen
+  // server-side with the Admin SDK since they write into other players'
+  // own data.
   const handleConfirmCancel = async () => {
     setBusy(true);
+    setCancelError("");
     try {
-      await updateEvent(confirmCancel.id, { canceled: true, canceledAt: serverTimestamp() });
+      const cancelWithVouchers = httpsCallable(functions, "cancelEventWithVouchers");
+      await cancelWithVouchers({ eventId: confirmCancel.id });
       setConfirmCancel(null);
+    } catch (err) {
+      console.error("cancelEventWithVouchers failed:", err);
+      setCancelError("Couldn't cancel this event — try again, or reach out on Discord if it keeps happening.");
     } finally {
       setBusy(false);
     }
@@ -2742,14 +2756,17 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
       </div>
 
       {confirmCancel && (
-        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmCancel(null)}>
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && (setConfirmCancel(null), setCancelError(""))}>
           <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Cancel this event?</div>
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-              "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. This keeps the real record, unlike delete, and can be reversed by editing the event again.
+              "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. Any player who already paid for a ticket gets a digital voucher, good for a future event at this field, instead of a refund. This keeps the real record, unlike delete, and can be reversed by editing the event again.
             </p>
+            {cancelError && (
+              <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{cancelError}</p>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => setConfirmCancel(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+              <button onClick={() => { setConfirmCancel(null); setCancelError(""); }} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Never mind
               </button>
               <button onClick={handleConfirmCancel} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
