@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink, PartyPopper,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink, PartyPopper, Ticket,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
@@ -2120,13 +2120,41 @@ function CheckInScreen({ event, onBack }) {
 }
 
 /* ---------- Roster ---------- */
-function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer }) {
+function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const bannedUids = new Set(banned.map((b) => b.uid));
   const [showManualCheckIn, setShowManualCheckIn] = useState(false);
   const [rosterFilter, setRosterFilter] = useState("all"); // all | checkedIn | notYet
   const [rosterSearch, setRosterSearch] = useState("");
+  const [confirmGrant, setConfirmGrant] = useState(null); // { uid, name, booking }
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grantError, setGrantError] = useState("");
+
+  // Display-only preview — the real amount is computed server-side in
+  // grantVoucherToPlayer using the exact same math, so this will always
+  // match what actually gets issued.
+  const previewGrantAmountCents = confirmGrant
+    ? (profile?.feeModel === "absorb"
+        ? confirmGrant.booking.amountPaidCents
+        : Math.max(0, confirmGrant.booking.amountPaidCents - (confirmGrant.booking.bookingFeeCents || 0)))
+    : 0;
+
+  const handleConfirmGrant = async () => {
+    if (!confirmGrant) return;
+    setGrantBusy(true);
+    setGrantError("");
+    try {
+      const grantVoucher = httpsCallable(functions, "grantVoucherToPlayer");
+      await grantVoucher({ eventId: event.id, uid: confirmGrant.uid });
+      setConfirmGrant(null);
+    } catch (err) {
+      console.error("grantVoucherToPlayer failed:", err);
+      setGrantError("Couldn't issue that voucher — try again, or reach out on Discord if it keeps happening.");
+    } finally {
+      setGrantBusy(false);
+    }
+  };
 
   const renderPersonRow = (uid, name, dateValue, checkedIn) => {
     const isBanned = bannedUids.has(uid);
@@ -2170,15 +2198,26 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>{dateValue.toDate().toLocaleDateString()}</div>
           )}
         </div>
-        {isBanned ? (
-          <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
-            Unban
-          </button>
-        ) : (
-          <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}>
-            Ban
-          </button>
-        )}
+        <div className="flex flex-col items-end gap-1.5">
+          {matchingBooking?.paid && typeof matchingBooking.amountPaidCents === "number" && matchingBooking.amountPaidCents > 0 && (
+            <button
+              onClick={() => setConfirmGrant({ uid, name, booking: matchingBooking })}
+              className="px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1"
+              style={{ ...body, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: T.rPill }}
+            >
+              <Ticket size={12} /> Give Voucher
+            </button>
+          )}
+          {isBanned ? (
+            <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+              Unban
+            </button>
+          ) : (
+            <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}>
+              Ban
+            </button>
+          )}
+        </div>
       </div>
     );
   };
@@ -2380,6 +2419,28 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           onClose={() => setShowManualCheckIn(false)}
         />
       )}
+
+      {confirmGrant && (
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !grantBusy && (setConfirmGrant(null), setGrantError(""))}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Give {confirmGrant.name} a voucher?</div>
+            <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+              This frees their spot on "{event.title}" and issues them a ${(previewGrantAmountCents / 100).toFixed(2)} voucher, good for a future event at this field — instead of a refund.
+            </p>
+            {grantError && (
+              <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{grantError}</p>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => { setConfirmGrant(null); setGrantError(""); }} disabled={grantBusy} className="flex-1 py-2.5 text-[13px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+                Never mind
+              </button>
+              <button onClick={handleConfirmGrant} disabled={grantBusy} className="flex-1 py-2.5 text-[13px] font-semibold" style={{ ...display, background: T.accent, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: grantBusy ? 0.6 : 1 }}>
+                {grantBusy ? "Issuing…" : "Give Voucher"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2535,7 +2596,7 @@ function OwnerBottomNav({ active, onNavigate }) {
 }
 
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
-function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, restoreEvent, duplicateEvent, updateEvent }) {
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, restoreEvent, duplicateEvent, updateEvent, profile }) {
   const [tab, setTab] = useState("upcoming");
   const [searchQuery, setSearchQuery] = useState("");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
@@ -2543,6 +2604,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   const [confirmPublish, setConfirmPublish] = useState(null);
   const [confirmCancel, setConfirmCancel] = useState(null);
   const [cancelError, setCancelError] = useState("");
+  const [expirationDays, setExpirationDays] = useState(365);
   const [busy, setBusy] = useState(false);
   const today = localDateStr();
 
@@ -2599,7 +2661,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
     setCancelError("");
     try {
       const cancelWithVouchers = httpsCallable(functions, "cancelEventWithVouchers");
-      await cancelWithVouchers({ eventId: confirmCancel.id });
+      await cancelWithVouchers({ eventId: confirmCancel.id, voucherExpirationDays: Number(expirationDays) || 365 });
       setConfirmCancel(null);
     } catch (err) {
       console.error("cancelEventWithVouchers failed:", err);
@@ -2740,7 +2802,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                       </button>
                     )}
                     {!ev.draft && !ev.canceled && (
-                      <button onClick={() => setConfirmCancel(ev)} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+                      <button onClick={() => { setConfirmCancel(ev); setExpirationDays(profile?.voucherExpirationDays || 365); }} className="px-3 py-2 flex items-center justify-center" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                         <Ban size={14} />
                       </button>
                     )}
@@ -2762,6 +2824,19 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
               "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. Any player who already paid for a ticket gets a digital voucher, good for a future event at this field, instead of a refund. This keeps the real record, unlike delete, and can be reversed by editing the event again.
             </p>
+            <label className="block mb-4">
+              <span className="block text-[11px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Vouchers expire after (days)</span>
+              <input
+                type="number"
+                min="1"
+                max="3650"
+                value={expirationDays}
+                onChange={(e) => setExpirationDays(e.target.value)}
+                disabled={busy}
+                className="w-full px-3 py-2 text-[13px]"
+                style={{ ...body, color: T.ash, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 6 }}
+              />
+            </label>
             {cancelError && (
               <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{cancelError}</p>
             )}
@@ -4090,6 +4165,7 @@ export default function App() {
         bannedLoading={bannedLoading}
         banPlayer={banPlayer}
         unbanPlayer={unbanPlayer}
+        profile={profile}
       />
     );
   } else if (overlay === "checkIn" && rosterEvent) {
@@ -4110,6 +4186,7 @@ export default function App() {
           restoreEvent={restoreEvent}
           duplicateEvent={duplicateEvent}
           updateEvent={updateEvent}
+          profile={profile}
         />
       );
     } else if (activeTab === "analytics") {
