@@ -3175,6 +3175,27 @@ function PayoutsScreen({ profile, onBack, checking }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [manualChecking, setManualChecking] = useState(false);
+  const [refreshingBalance, setRefreshingBalance] = useState(false);
+
+  // Refreshes pending/available balance every time this screen opens —
+  // separate from the onboarding-status effect further down (App itself),
+  // which stops polling once payoutsEnabled flips true. This one exists
+  // specifically so an already-set-up owner sees a current balance rather
+  // than whatever checkPayoutsStatus last wrote, potentially days ago —
+  // the whole point is answering "where's my money" without them having
+  // to leave the app, so a stale number here defeats the purpose.
+  useEffect(() => {
+    if (!profile?.payoutsEnabled || !profile?.stripeConnectAccountId) return;
+    setRefreshingBalance(true);
+    const checkStatus = httpsCallable(functions, "checkPayoutsStatus");
+    checkStatus()
+      .catch((err) => console.error("checkPayoutsStatus (balance refresh) failed:", err))
+      .finally(() => setRefreshingBalance(false));
+    // Deliberately runs once per mount (i.e. each time the owner opens
+    // Payouts), not on every profile change — profile updates as a side
+    // effect of this same call landing, which would otherwise loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSetUpPayouts = async () => {
     setLoading(true);
@@ -3235,6 +3256,20 @@ function PayoutsScreen({ profile, onBack, checking }) {
           </div>
           <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Payouts active</div>
           <p className="text-[12px] mb-5" style={{ ...body, color: T.ashDim }}>Your Stripe account is set up to receive player booking payments directly.</p>
+          {typeof profile?.balanceAvailableCents === "number" || typeof profile?.balancePendingCents === "number" ? (
+            <div className="flex gap-2 mb-5">
+              <div className="flex-1 p-3" style={{ background: T.panel, borderRadius: T.rCard }}>
+                <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>${((profile.balanceAvailableCents || 0) / 100).toFixed(2)}</div>
+                <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Available</div>
+              </div>
+              <div className="flex-1 p-3" style={{ background: T.panel, borderRadius: T.rCard }}>
+                <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>${((profile.balancePendingCents || 0) / 100).toFixed(2)}</div>
+                <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Pending — clears with Stripe first</div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] mb-5" style={{ ...body, color: T.ashFaint }}>{refreshingBalance ? "Checking your balance…" : "Balance unavailable right now."}</p>
+          )}
           <button
             onClick={() => {
               // Standard Connect accounts have no login-link API (that's
