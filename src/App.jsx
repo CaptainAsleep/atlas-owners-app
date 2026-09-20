@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Shield, LogOut, ChevronLeft, ChevronRight, Search, Plus, Trash2, Check, Ban,
   ArrowRight, Calendar, MapPin, Copy, FileSignature, Image as ImageIcon, TrendingUp,
-  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink, PartyPopper, Ticket,
+  Settings, Users, LayoutDashboard, Pencil, QrCode, X, RotateCcw, ExternalLink, PartyPopper, Ticket, Share2,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
@@ -121,6 +121,31 @@ function downloadCsv(filename, headers, rows) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Builds a player-app deep link to this field's public page and either
+// hands it to the native share sheet (mobile) or copies it to the
+// clipboard (desktop / no Web Share API) — same pattern the player app's
+// own field-detail Share button uses, so behavior is consistent across
+// both apps.
+async function shareFieldLink(field) {
+  if (!field?.id) return "unsupported";
+  const url = `https://playerapp.airsoftatlas.app/?field=${field.id}`;
+  const title = field.name || "Atlas field";
+  const text = field.name ? `${field.name} on Atlas` : "This field on Atlas";
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return "shared";
+    } catch (err) {
+      return "cancelled"; // owner backed out of the share sheet — not an error
+    }
+  }
+  if (navigator.clipboard) {
+    await navigator.clipboard.writeText(url);
+    return "copied";
+  }
+  return "unsupported";
 }
 
 function displayPrice(price) {
@@ -731,6 +756,14 @@ const PRESET_AMENITIES = ["Pro Shop", "Chrono Station", "HPA Refills", "Rentals 
 function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onOpenEvent, onCreateEvent }) {
   const [showDtbQr, setShowDtbQr] = useState(false);
   const [dtbQrUrl, setDtbQrUrl] = useState(null);
+  const [shareState, setShareState] = useState(null);
+  const handleShare = async () => {
+    const result = await shareFieldLink(field);
+    if (result === "copied") {
+      setShareState("copied");
+      setTimeout(() => setShareState(null), 2000);
+    }
+  };
 
   const fieldEvents = events.filter((e) => e.fieldId === field.id && !e.deleted);
   const today = new Date().toISOString().slice(0, 10);
@@ -761,10 +794,18 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
           <ChevronLeft size={20} color={T.ash} />
         </button>
         <h1 className="flex-1 text-center text-[16px] font-semibold truncate px-2" style={{ ...display, color: T.ash }}>{field.name}</h1>
+        <button onClick={handleShare} className="w-9 h-9 flex items-center justify-center" title="Copy this field's Atlas link">
+          {shareState === "copied" ? <Check size={16} color={T.good} /> : <Share2 size={16} color={T.ash} />}
+        </button>
         <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center">
           <Pencil size={16} color={T.ash} />
         </button>
       </div>
+      {shareState === "copied" && (
+        <div className="px-6 pt-2 text-[11px] text-center" style={{ ...body, color: T.good }}>
+          Field link copied — paste it anywhere.
+        </div>
+      )}
 
       <div className="px-6 pt-4">
         <div className="flex items-center gap-3 mb-4">
