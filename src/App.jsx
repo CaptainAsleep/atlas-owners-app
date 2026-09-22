@@ -917,9 +917,22 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [amenities, setAmenities] = useState(field.amenities || []);
   const [customAmenity, setCustomAmenity] = useState("");
   const [rulesText, setRulesText] = useState((field.rules || []).join("\n"));
-  const [chronoAeg, setChronoAeg] = useState(field.chrono?.aeg || "");
-  const [chronoSniper, setChronoSniper] = useState(field.chrono?.sniper || "");
-  const [chronoDmr, setChronoDmr] = useState(field.chrono?.dmr || "");
+  // A flexible list of { label, value } pairs (e.g. { label: "AEG", value:
+  // "400 FPS max (0.20g)" }) instead of a fixed aeg/sniper/dmr shape, so an
+  // owner can add or remove as many chrono limits as their field actually
+  // needs. A field saved under the old fixed shape gets read in here as its
+  // 3 named rows and upgraded to this list shape the next time it's saved;
+  // FieldFacts on the player app reads both shapes.
+  const initialChronoLimits = (() => {
+    const ch = field.chrono;
+    if (Array.isArray(ch)) return ch.map((item) => ({ label: item?.label || "", value: item?.value || "" }));
+    return [
+      { label: "AEG", value: ch?.aeg || "" },
+      { label: "Sniper", value: ch?.sniper || "" },
+      { label: "DMR", value: ch?.dmr || "" },
+    ];
+  })();
+  const [chronoLimits, setChronoLimits] = useState(initialChronoLimits);
   const [rentals, setRentals] = useState(field.rentals || []);
   const [savedWaivers, setSavedWaivers] = useState(field.savedWaivers || []);
 
@@ -977,8 +990,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     city: (field.city || "").split(",")[0]?.trim() || "", state: (field.city || "").split(",")[1]?.trim() || "",
     phone: field.phone || "", email: field.email || "", website: field.website || "",
     about: field.about || "", amenities: field.amenities || [],
-    rulesText: (field.rules || []).join("\n"), chronoAeg: field.chrono?.aeg || "",
-    chronoSniper: field.chrono?.sniper || "", chronoDmr: field.chrono?.dmr || "", rentals: field.rentals || [],
+    rulesText: (field.rules || []).join("\n"), chronoLimits: initialChronoLimits, rentals: field.rentals || [],
     savedWaivers: field.savedWaivers || [],
     shipRecipient: "", shipLine1: "", shipLine2: "", shipCity: "", shipState: "", shipZip: "", shipNotes: "",
   });
@@ -988,8 +1000,8 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     phone !== snapshot.phone || email !== snapshot.email || website !== snapshot.website ||
     about !== snapshot.about ||
     JSON.stringify(amenities) !== JSON.stringify(snapshot.amenities) ||
-    rulesText !== snapshot.rulesText || chronoAeg !== snapshot.chronoAeg ||
-    chronoSniper !== snapshot.chronoSniper || chronoDmr !== snapshot.chronoDmr ||
+    rulesText !== snapshot.rulesText ||
+    JSON.stringify(chronoLimits) !== JSON.stringify(snapshot.chronoLimits) ||
     JSON.stringify(rentals) !== JSON.stringify(snapshot.rentals) ||
     JSON.stringify(savedWaivers) !== JSON.stringify(snapshot.savedWaivers) ||
     shipRecipient !== snapshot.shipRecipient || shipLine1 !== snapshot.shipLine1 || shipLine2 !== snapshot.shipLine2 ||
@@ -1004,6 +1016,14 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     setCustomAmenity("");
   };
   const removeAmenity = (a) => setAmenities(amenities.filter((x) => x !== a));
+
+  const addChronoLimit = () => setChronoLimits([...chronoLimits, { label: "", value: "" }]);
+  const updateChronoLimit = (i, key, value) => {
+    const next = [...chronoLimits];
+    next[i] = { ...next[i], [key]: value };
+    setChronoLimits(next);
+  };
+  const removeChronoLimit = (i) => setChronoLimits(chronoLimits.filter((_, idx) => idx !== i));
 
   const addRental = () => setRentals([...rentals, { name: "", price: "", includes: "", availability: "" }]);
   const updateRental = (i, key, value) => {
@@ -1081,7 +1101,10 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     setError("");
     try {
       const rules = rulesText.split("\n").map((s) => s.trim()).filter(Boolean);
-      const chrono = (chronoAeg || chronoSniper || chronoDmr) ? { aeg: chronoAeg, sniper: chronoSniper, dmr: chronoDmr } : null;
+      const cleanChrono = chronoLimits
+        .map((ch) => ({ label: ch.label.trim(), value: ch.value.trim() }))
+        .filter((ch) => ch.label || ch.value);
+      const chrono = cleanChrono.length > 0 ? cleanChrono : null;
       const cleanRentals = rentals.filter((r) => r.name.trim());
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       await updateFieldProfile(field.id, {
@@ -1104,7 +1127,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         notes: shipNotes.trim(),
       });
       setSnapshot({
-        imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoAeg, chronoSniper, chronoDmr, rentals, savedWaivers,
+        imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoLimits, rentals, savedWaivers,
         shipRecipient, shipLine1, shipLine2, shipCity, shipState, shipZip, shipNotes,
       });
       setSaved(true);
@@ -1244,16 +1267,25 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         <Eyebrow>Field Rules (one per line)</Eyebrow>
         <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
 
-        <div className="mb-1">
-          <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Chrono Limits</label>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Chrono Limits</label>
+          <button onClick={addChronoLimit} className="text-[12px] font-semibold" style={{ ...body, color: T.accent }}>+ Add Item</button>
         </div>
-        <div className="grid grid-cols-1 gap-2 mb-3">
-          <input value={chronoAeg} onChange={(e) => setChronoAeg(e.target.value)} placeholder="AEG — e.g. 400 FPS max (0.20g)"
-            className="w-full px-3 py-2.5 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
-          <input value={chronoSniper} onChange={(e) => setChronoSniper(e.target.value)} placeholder="Sniper — e.g. 500 FPS max (0.20g)"
-            className="w-full px-3 py-2.5 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
-          <input value={chronoDmr} onChange={(e) => setChronoDmr(e.target.value)} placeholder="DMR — optional"
-            className="w-full px-3 py-2.5 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+        <div className="mb-3">
+          {chronoLimits.map((ch, i) => (
+            <div key={i} className="flex gap-2 mb-2">
+              <input value={ch.label} onChange={(e) => updateChronoLimit(i, "label", e.target.value)} placeholder="e.g. AEG, Sniper, Pistol"
+                className="w-28 flex-shrink-0 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <input value={ch.value} onChange={(e) => updateChronoLimit(i, "value", e.target.value)} placeholder="e.g. 400 FPS max (0.20g)"
+                className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <button onClick={() => removeChronoLimit(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
+                <Trash2 size={14} color={T.alert} />
+              </button>
+            </div>
+          ))}
+          {chronoLimits.length === 0 && (
+            <p className="text-[11px]" style={{ ...body, color: T.ashFaint }}>No chrono limits added yet.</p>
+          )}
         </div>
 
         <div className="mb-2 flex items-center justify-between">
