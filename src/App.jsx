@@ -1416,10 +1416,14 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
-          <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+          <button
+            onClick={() => onOpenRoster(ev)}
+            className="p-3 text-center"
+            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          >
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{ev.bookedCount || 0}{typeof ev.maxCapacity === "number" ? `/${ev.maxCapacity}` : ""}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
-          </div>
+          </button>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.interestCount || 0}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
@@ -1657,6 +1661,23 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
       setError("Couldn't upload that patch — try again.");
     } finally {
       setPatchUploading(false);
+    }
+  };
+  // Clears both the name and image so Save writes checkInPatch: null (see
+  // the ternary in handleSave's payload below) — an owner previously had
+  // no way to remove a patch once attached, short of the non-obvious
+  // "clear just the name text" side effect. Also tries to delete the
+  // uploaded file itself, same "best-effort, not worth failing the UI
+  // over" pattern as FieldManageScreen's removeGalleryPhoto — the upload
+  // path is deterministic (one file per event), so a re-attach later just
+  // overwrites it either way even if this delete silently no-ops.
+  const removePatch = async () => {
+    setPatchName("");
+    setPatchImageUrl(null);
+    try {
+      await deleteObject(ref(storage, `eventPatches/${field.id}/${eventId}/patch.jpg`));
+    } catch {
+      // file may already be gone — not worth failing the UI over
     }
   };
 
@@ -1950,6 +1971,15 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             className="flex-1 px-3 py-2.5 text-[14px] bg-transparent outline-none"
             style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }}
           />
+          {patchImageUrl && (
+            <button
+              onClick={removePatch}
+              className="w-9 h-9 flex-shrink-0 flex items-center justify-center"
+              style={{ background: T.panelAlt, borderRadius: T.rPill }}
+            >
+              <Trash2 size={14} color={T.alert} />
+            </button>
+          )}
         </div>
 
         {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
