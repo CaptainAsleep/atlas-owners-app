@@ -933,7 +933,16 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     ];
   })();
   const [chronoLimits, setChronoLimits] = useState(initialChronoLimits);
-  const [rentals, setRentals] = useState(field.rentals || []);
+  // Rental items need a stable id (like priceOptions.choices already have
+  // on events) so the checkout Cloud Function can safely re-validate a
+  // player's selection against this field's real, current rental catalog
+  // by id rather than trusting a client-sent price. Existing rentals saved
+  // before this had no id — backfilled here on load, same
+  // read-old-shape-then-upgrade-on-save approach already used for Chrono
+  // Limits above.
+  const [rentals, setRentals] = useState(
+    (field.rentals || []).map((r, i) => ({ ...r, id: r.id || `rental_legacy_${i}` }))
+  );
   const [savedWaivers, setSavedWaivers] = useState(field.savedWaivers || []);
 
   // Private shipping/mailing address — loaded separately (a different,
@@ -1025,7 +1034,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   };
   const removeChronoLimit = (i) => setChronoLimits(chronoLimits.filter((_, idx) => idx !== i));
 
-  const addRental = () => setRentals([...rentals, { name: "", price: "", includes: "", availability: "" }]);
+  const addRental = () => setRentals([...rentals, { id: `rental_${Date.now()}_${rentals.length}`, name: "", price: "", includes: "", availability: "" }]);
   const updateRental = (i, key, value) => {
     const next = [...rentals];
     next[i] = { ...next[i], [key]: value };
@@ -1105,7 +1114,13 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         .map((ch) => ({ label: ch.label.trim(), value: ch.value.trim() }))
         .filter((ch) => ch.label || ch.value);
       const chrono = cleanChrono.length > 0 ? cleanChrono : null;
-      const cleanRentals = rentals.filter((r) => r.name.trim());
+      // priceCents is the trustworthy number checkout validates a player's
+      // rental selection against server-side — the free-text `price` stays
+      // exactly as typed for display/editing (e.g. "$30"), parsed the same
+      // way priceOptionsChoices' price already is on events.
+      const cleanRentals = rentals
+        .filter((r) => r.name.trim())
+        .map((r) => ({ ...r, priceCents: Math.round((parsePrice(r.price) || 0) * 100) }));
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       await updateFieldProfile(field.id, {
         name, address, city: combinedCity, phone, email, website, about, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
@@ -2263,6 +2278,11 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                 {matchingBooking.selectedChoiceLabel}
               </span>
             )}
+            {matchingBooking?.selectedRentals?.length > 0 && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
+                Rented: {matchingBooking.selectedRentals.map((r) => r.name).join(", ")}
+              </span>
+            )}
           </div>
           {secondaryName && (
             <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{secondaryName}</div>
@@ -2343,10 +2363,11 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Reserved Players.csv`,
-                ["Callsign", "Selected Option", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Refund Status", "Stripe Checkout Session ID"],
+                ["Callsign", "Selected Option", "Rentals", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Refund Status", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
                   b.selectedChoiceLabel || "",
+                  (b.selectedRentals || []).map((r) => r.name).join(", "),
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
                   b.checkedIn ? "Yes" : "No",
                   b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
