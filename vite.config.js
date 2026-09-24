@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       includeAssets: ["apple-touch-icon.png", "favicon-32.png", "favicon-16.png", "logo.jpg"],
       manifest: {
         name: "Atlas for Field Owners",

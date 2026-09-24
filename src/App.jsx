@@ -11,6 +11,7 @@ import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBann
 import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useOwnerFinancials, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useSWUpdate } from "./hooks/useSWUpdate";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
 import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
@@ -3917,6 +3918,41 @@ function formatPayoutSchedule(schedule) {
   return "on Stripe's standard schedule — check your Stripe dashboard for your exact timing";
 }
 
+// Deliberately a small dismissable-by-ignoring floating bar, not a modal
+// like PayoutCelebrationModal below — a new build being ready is never
+// urgent enough to block whatever the owner is doing (managing a field,
+// checking a player in at the gate), so this never force-reloads on its
+// own. It only reloads when the owner themselves taps Refresh.
+function UpdateAvailableToast({ onRefresh }) {
+  return (
+    <div
+      className="fixed left-4 right-4 flex items-center justify-between gap-3 px-4 py-3"
+      style={{
+        bottom: 84,
+        background: T.glassFill,
+        backdropFilter: T.glassBlur,
+        WebkitBackdropFilter: T.glassBlur,
+        border: T.glassBorder,
+        borderRadius: T.rFloat,
+        boxShadow: T.shadowFloat,
+        zIndex: 1800,
+      }}
+    >
+      <p className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>
+        A new version of Atlas is ready.
+      </p>
+      <button
+        onClick={onRefresh}
+        className="flex items-center gap-1.5 px-3.5 py-2 text-[12px] font-semibold flex-shrink-0"
+        style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill }}
+      >
+        <RotateCcw size={13} />
+        Refresh
+      </button>
+    </div>
+  );
+}
+
 // The one-time "congrats on a successful event" popup — surfaced by
 // usePayoutCelebration once per real (paid) event, the next time the
 // owner logs in after it wraps up. Deliberately no dismiss-by-tapping-the-
@@ -4037,6 +4073,7 @@ function ClaimWelcomeScreen({ fieldName, onContinue }) {
 
 /* ---------- App shell ---------- */
 export default function App() {
+  const { needRefresh, refreshNow } = useSWUpdate();
   // Sets the real, trustworthy height — but not from window.screen.height
   // alone, since that's the *physical* screen including the area behind
   // the status bar, and env(safe-area-inset-*) proved unreliable here for
@@ -4383,6 +4420,7 @@ export default function App() {
             onDismiss={dismissCelebration}
           />
         )}
+        {needRefresh && <UpdateAvailableToast onRefresh={refreshNow} />}
       </div>
     </div>
   );
