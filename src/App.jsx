@@ -83,6 +83,52 @@ function localDateStr(d = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+// Which calendar year "Year in Review" covers right now. During January,
+// that's last year — just finished, still fresh. The rest of the year
+// it's this year so far, which is what most of the year actually looks
+// like and simply becomes the complete year by December — no special
+// first-year case needed, and no year picker either. Identical to the
+// player app's own version (no shared code between the two apps).
+function reviewYear() {
+  const now = new Date();
+  return now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+}
+
+// The unprompted dashboard banner only shows itself Dec 26 - Jan 31 —
+// newsworthy right after the holidays, through most of January. The
+// recap itself stays reachable year-round from Settings; this only gates
+// the nudge, never access to the screen.
+function isReviewWindow() {
+  const now = new Date();
+  const m = now.getMonth(); // 0-11
+  const d = now.getDate();
+  return (m === 11 && d >= 26) || (m === 0 && d <= 31);
+}
+
+// Classifies every booking as this player's "new" (their earliest-ever
+// booking with this owner, across every field they run) or "returning"
+// (any booking after that), using the owner's FULL booking history —
+// never just the target year — since whether someone's a repeat player
+// depends on their whole history with this owner, not just what happened
+// this year. A standalone function rather than reusing AnalyticsScreen's
+// inline returningStats logic: that logic already shipped and is
+// verified, and duplicating this one small piece of it here avoids any
+// risk of touching it. Returns a new array (original order) with each
+// booking's isReturning flag attached; the caller filters by year after.
+function classifyReturning(allBookings) {
+  const byUid = {};
+  allBookings.forEach((b) => {
+    if (!b.bookedAt?.toDate) return;
+    (byUid[b.uid] || (byUid[b.uid] = [])).push(b);
+  });
+  const returningIds = new Set();
+  Object.values(byUid).forEach((list) => {
+    const sorted = [...list].sort((a, b) => a.bookedAt.toDate() - b.bookedAt.toDate());
+    sorted.forEach((b, i) => { if (i > 0) returningIds.add(b); });
+  });
+  return allBookings.map((b) => ({ ...b, isReturning: b.bookedAt?.toDate ? returningIds.has(b) : false }));
+}
+
 // Haversine formula — straight-line distance in miles between two points.
 function distanceMiles(lat1, lng1, lat2, lng2) {
   const R = 3958.8;
@@ -412,7 +458,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onOpenYearInReview, onLogout }) {
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && !e.deleted && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.filter((e) => !e.deleted).reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -438,6 +484,19 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
+        {isReviewWindow() && (
+          <button
+            onClick={onOpenYearInReview}
+            className="w-full mb-5 p-4 flex items-center gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: "linear-gradient(135deg, #1554B8, #0B2E5C)", borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          >
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold" style={{ ...display, color: "#FFFFFF" }}>Your {reviewYear()} Year in Review is ready</div>
+              <div className="text-[11px]" style={{ ...body, color: "rgba(255,255,255,0.75)" }}>See what this year looked like across your fields — tap to open.</div>
+            </div>
+            <ChevronRight size={16} color="#FFFFFF" />
+          </button>
+        )}
         {myFields.length > 0 && !profile?.payoutsEnabled && (
           <button
             onClick={onOpenPayouts}
@@ -3531,6 +3590,136 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
   );
 }
 
+// A once-a-year recap, Wrapped-style: one full-screen card per stat,
+// tapped or swiped through. Computes its own data on open (via the same
+// useOwnerFinancials / useOwnerReservationStats hooks Analytics already
+// uses) rather than a stored summary doc — reusing the exact trade-off
+// already accepted there (a real Firestore-read cost each time this
+// opens, paid once a year). Combined across every field this owner runs,
+// not broken out per field, per Michael. No real drag-swipe gesture —
+// tap zones plus visible arrow buttons, same idiom as the player app's
+// own version of this screen (and PatchesScreen's lightbox before that).
+function OwnerYearInReviewScreen({ onBack, events, year }) {
+  const [index, setIndex] = useState(0);
+  const published = events.filter((e) => !e.draft && !e.deleted);
+  const { records, financialsLoading } = useOwnerFinancials(published);
+  const { reservationBookings, reservationStatsLoading } = useOwnerReservationStats(published);
+  const loading = financialsLoading || reservationStatsLoading;
+
+  const yearStr = String(year);
+  const today = localDateStr();
+
+  const eventsHosted = published.filter((e) => (e.endDate || e.date || "").slice(0, 4) === yearStr).length;
+
+  const yearBookings = reservationBookings.filter((b) => b.bookedAt?.toDate && b.bookedAt.toDate().getFullYear() === year);
+  const totalReservations = yearBookings.length;
+
+  const yearRevenueCents = records
+    .filter((r) => r.bookedAt?.toDate && r.bookedAt.toDate().getFullYear() === year)
+    .reduce((sum, r) => sum + r.netCents, 0);
+
+  const pastYearBookings = reservationBookings.filter(
+    (b) => (b.eventDate || "").slice(0, 4) === yearStr && (b.eventDate || "") < today
+  );
+  const checkInRate = pastYearBookings.length > 0
+    ? (pastYearBookings.filter((b) => b.checkedIn).length / pastYearBookings.length) * 100
+    : null;
+
+  // Classified against the owner's FULL booking history (see
+  // classifyReturning's own comment), then narrowed down to just this
+  // year's bookings for the year's returning-share.
+  const classified = classifyReturning(reservationBookings).filter(
+    (b) => b.bookedAt?.toDate && b.bookedAt.toDate().getFullYear() === year
+  );
+  const returningRate = classified.length > 0
+    ? (classified.filter((b) => b.isReturning).length / classified.length) * 100
+    : null;
+
+  const cards = [
+    { intro: true, title: String(year), subtitle: "Your Year in Review" },
+    { big: eventsHosted, label: eventsHosted === 1 ? "Event Hosted" : "Events Hosted" },
+    { big: totalReservations, label: totalReservations === 1 ? "Reservation" : "Reservations", sub: "Paid and free bookings combined" },
+    { big: `$${(yearRevenueCents / 100).toFixed(2)}`, label: "Collected", sub: "Your share, after Atlas's booking fee" },
+    checkInRate != null && { big: `${checkInRate.toFixed(0)}%`, label: "Check-In Rate", sub: "Across this year's past events" },
+    returningRate != null && { big: `${returningRate.toFixed(0)}%`, label: "Returning Players", sub: "Of this year's reservations" },
+    { closing: true, title: "See You Out There", subtitle: `Here's to an even bigger ${year + 1}.` },
+  ].filter(Boolean);
+
+  const isFirst = index === 0;
+  const isLast = index === cards.length - 1;
+  const goNext = () => (isLast ? onBack() : setIndex((i) => Math.min(i + 1, cards.length - 1)));
+  const goPrev = () => { if (!isFirst) setIndex((i) => i - 1); };
+  const card = cards[Math.min(index, cards.length - 1)];
+
+  if (loading) {
+    return (
+      <div className="h-full w-full flex items-center justify-center" style={{ backgroundColor: "#0B2140" }}>
+        <div className="text-[13px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>Loading your year…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full w-full relative overflow-hidden" style={{ backgroundColor: "#0B2140" }}>
+      <div className="absolute top-6 left-6 right-16 flex gap-1.5 z-20">
+        {cards.map((_, i) => (
+          <div key={i} className="flex-1 h-1" style={{ borderRadius: 999, background: i <= index ? "#FFFFFF" : "rgba(255,255,255,0.25)" }} />
+        ))}
+      </div>
+      <button
+        onClick={onBack}
+        className="absolute top-5 right-5 w-10 h-10 flex items-center justify-center z-20 transition-transform duration-100 active:scale-90"
+        style={{ background: "rgba(255,255,255,0.12)", borderRadius: 999 }}
+      >
+        <X size={18} color="#FFFFFF" />
+      </button>
+
+      <button onClick={goPrev} className="absolute left-0 top-0 bottom-0 w-1/3 z-10" aria-label="Previous" style={{ background: "transparent" }} />
+      <button onClick={goNext} className="absolute right-0 top-0 bottom-0 w-2/3 z-10" aria-label="Next" style={{ background: "transparent" }} />
+
+      <div className="h-full w-full flex flex-col items-center justify-center px-8 text-center relative z-0" style={{ pointerEvents: "none" }}>
+        {card.intro && (
+          <>
+            <div className="text-[15px] font-semibold uppercase mb-2" style={{ ...body, color: "rgba(255,255,255,0.6)", letterSpacing: "0.08em" }}>Atlas</div>
+            <div className="text-[56px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.title}</div>
+            <div className="text-[18px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
+          </>
+        )}
+        {card.closing && (
+          <>
+            <div className="text-[26px] font-bold mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.title}</div>
+            <div className="text-[16px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
+          </>
+        )}
+        {!card.intro && !card.closing && (
+          <>
+            <div className="text-[64px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.big}</div>
+            <div className="text-[20px] font-semibold mb-2" style={{ ...display, color: "#FFFFFF" }}>{card.label}</div>
+            {card.sub && <div className="text-[14px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>{card.sub}</div>}
+          </>
+        )}
+      </div>
+
+      {!isFirst && (
+        <button
+          onClick={goPrev}
+          className="absolute left-3 w-11 h-11 flex items-center justify-center z-20 transition-transform duration-100 active:scale-90"
+          style={{ background: "rgba(255,255,255,0.15)", borderRadius: 999, top: "50%", transform: "translateY(-50%)" }}
+        >
+          <ChevronLeft size={22} color="#FFFFFF" />
+        </button>
+      )}
+      <button
+        onClick={goNext}
+        className="absolute right-3 w-11 h-11 flex items-center justify-center z-20 transition-transform duration-100 active:scale-90"
+        style={{ background: "rgba(255,255,255,0.15)", borderRadius: 999, top: "50%", transform: "translateY(-50%)" }}
+      >
+        <ChevronRight size={22} color="#FFFFFF" />
+      </button>
+    </div>
+  );
+}
+
 /* ---------- Settings ---------- */
 // Ceil rather than floor/round — someone with 6 hours left on their trial
 // should see "1 day left," not "0 days left" (which reads as "already
@@ -3830,7 +4019,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
   );
 }
 
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onOpenPayouts, onLogout }) {
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onOpenPayouts, onOpenYearInReview, onLogout }) {
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -3966,6 +4155,14 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
             {profile?.payoutsEnabled && <Check size={14} strokeWidth={2.5} />}
             {profile?.payoutsEnabled ? "Payouts Active" : "Set Up Payouts"}
           </span>
+          <ChevronRight size={16} color={T.ashFaint} />
+        </button>
+        <button
+          onClick={onOpenYearInReview}
+          className="w-full mb-6 p-4 flex items-center justify-between transition-transform duration-100 active:scale-[0.98]"
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+        >
+          <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Year in Review</span>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
 
@@ -4557,6 +4754,8 @@ export default function App() {
     content = <FeeModelScreen profile={profile} user={user} onBack={closeOverlay} />;
   } else if (overlay === "payouts") {
     content = <PayoutsScreen profile={profile} onBack={closeOverlay} checking={checkingPayouts} />;
+  } else if (overlay === "yearInReview") {
+    content = <OwnerYearInReviewScreen onBack={closeOverlay} events={allMyEvents} year={reviewYear()} />;
   } else if (overlay === "claimWelcome" && activeField) {
     content = (
       <ClaimWelcomeScreen
@@ -4662,6 +4861,7 @@ export default function App() {
           deleteAccount={deleteAccount}
           onOpenBilling={() => setOverlay("billing")}
           onOpenPayouts={() => setOverlay("payouts")}
+          onOpenYearInReview={() => setOverlay("yearInReview")}
           onLogout={handleLogout}
         />
       );
@@ -4681,6 +4881,7 @@ export default function App() {
           onOpenClaim={openClaim}
           onOpenPayouts={() => setOverlay("payouts")}
           onOpenBilling={() => setOverlay("billing")}
+          onOpenYearInReview={() => setOverlay("yearInReview")}
           onOpenEventsList={() => setActiveTab("events")}
           onCreateEvent={() => {
             if (myFields.length > 0) openEventEdit(myFields[0], null);
