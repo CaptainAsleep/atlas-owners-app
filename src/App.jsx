@@ -3603,6 +3603,34 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
 // not broken out per field, per Michael. No real drag-swipe gesture —
 // tap zones plus visible arrow buttons, same idiom as the player app's
 // own version of this screen (and PatchesScreen's lightbox before that).
+// Same fixed blue treatment and animation set as the player app's
+// identical recap (no shared code between the two apps, so duplicated
+// rather than imported) — a deliberate special-occasion look, same
+// reasoning as the dashboard banner's own fixed gradient.
+const YEAR_IN_REVIEW_KEYFRAMES = `
+@keyframes yirBgShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+@keyframes yirCardIn {
+  0% { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes yirNumberPop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes yirGlow {
+  0%, 100% { text-shadow: 0 0 18px rgba(255,255,255,0.25); }
+  50% { text-shadow: 0 0 34px rgba(255,255,255,0.55); }
+}
+@keyframes yirDotFill {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+`;
+
 function OwnerYearInReviewScreen({ onBack, events, year }) {
   const [index, setIndex] = useState(0);
   const published = events.filter((e) => !e.draft && !e.deleted);
@@ -3657,17 +3685,36 @@ function OwnerYearInReviewScreen({ onBack, events, year }) {
 
   if (loading) {
     return (
-      <div className="h-full w-full flex items-center justify-center" style={{ backgroundColor: "#0B2140" }}>
+      <div
+        className="h-full w-full flex items-center justify-center"
+        style={{ background: "linear-gradient(135deg, #1554B8, #0B2E5C, #1554B8)", backgroundSize: "200% 200%", animation: "yirBgShift 10s ease-in-out infinite" }}
+      >
         <div className="text-[13px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>Loading your year…</div>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full relative overflow-hidden" style={{ backgroundColor: "#0B2140" }}>
+    <div
+      className="h-full w-full relative overflow-hidden"
+      style={{ background: "linear-gradient(135deg, #1554B8, #0B2E5C, #1554B8)", backgroundSize: "200% 200%", animation: "yirBgShift 10s ease-in-out infinite" }}
+    >
+      <style>{YEAR_IN_REVIEW_KEYFRAMES}</style>
       <div className="absolute top-6 left-6 right-16 flex gap-1.5 z-20">
         {cards.map((_, i) => (
-          <div key={i} className="flex-1 h-1" style={{ borderRadius: 999, background: i <= index ? "#FFFFFF" : "rgba(255,255,255,0.25)" }} />
+          <div key={i} className="flex-1 h-1 overflow-hidden" style={{ borderRadius: 999, background: "rgba(255,255,255,0.25)" }}>
+            <div
+              key={i === index ? `active-${index}` : i < index ? "done" : "todo"}
+              className="h-full w-full"
+              style={{
+                borderRadius: 999,
+                background: "#FFFFFF",
+                transformOrigin: "left",
+                transform: i <= index ? "scaleX(1)" : "scaleX(0)",
+                animation: i === index ? "yirDotFill 0.4s ease-out" : "none",
+              }}
+            />
+          </div>
         ))}
       </div>
       <button
@@ -3681,11 +3728,15 @@ function OwnerYearInReviewScreen({ onBack, events, year }) {
       <button onClick={goPrev} className="absolute left-0 top-0 bottom-0 w-1/3 z-10" aria-label="Previous" style={{ background: "transparent" }} />
       <button onClick={goNext} className="absolute right-0 top-0 bottom-0 w-2/3 z-10" aria-label="Next" style={{ background: "transparent" }} />
 
-      <div className="h-full w-full flex flex-col items-center justify-center px-8 text-center relative z-0" style={{ pointerEvents: "none" }}>
+      <div
+        key={index}
+        className="h-full w-full flex flex-col items-center justify-center px-8 text-center relative z-0"
+        style={{ pointerEvents: "none", animation: "yirCardIn 0.4s ease-out" }}
+      >
         {card.intro && (
           <>
             <div className="text-[15px] font-semibold uppercase mb-2" style={{ ...body, color: "rgba(255,255,255,0.6)", letterSpacing: "0.08em" }}>Atlas</div>
-            <div className="text-[56px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.title}</div>
+            <div className="text-[56px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1)" }}>{card.title}</div>
             <div className="text-[18px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
           </>
         )}
@@ -3697,7 +3748,12 @@ function OwnerYearInReviewScreen({ onBack, events, year }) {
         )}
         {!card.intro && !card.closing && (
           <>
-            <div className="text-[64px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.big}</div>
+            <div
+              className="text-[64px] font-bold leading-none mb-3"
+              style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1), yirGlow 2.4s ease-in-out infinite 0.55s" }}
+            >
+              {card.big}
+            </div>
             <div className="text-[20px] font-semibold mb-2" style={{ ...display, color: "#FFFFFF" }}>{card.label}</div>
             {card.sub && <div className="text-[14px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>{card.sub}</div>}
           </>
