@@ -853,18 +853,8 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
           <ChevronLeft size={20} color={T.ash} />
         </button>
         <h1 className="flex-1 text-center text-[16px] font-semibold truncate px-2" style={{ ...display, color: T.ash }}>{field.name}</h1>
-        <button
-          onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${field.id}`, "_blank", "noopener,noreferrer")}
-          className="w-9 h-9 flex items-center justify-center transition-transform duration-100 active:scale-90"
-          title="View this field the way a player sees it"
-        >
-          <ExternalLink size={16} color={T.ash} />
-        </button>
         <button onClick={handleShare} className="w-9 h-9 flex items-center justify-center transition-transform duration-100 active:scale-90" title="Copy this field's Atlas link">
           {shareState === "copied" ? <Check size={16} color={T.good} /> : <Share2 size={16} color={T.ash} />}
-        </button>
-        <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center transition-transform duration-100 active:scale-90">
-          <Pencil size={16} color={T.ash} />
         </button>
       </div>
       {shareState === "copied" && (
@@ -903,6 +893,26 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
             <div className="text-[15px] font-semibold" style={{ ...display, color: T.ash }}>{field.name}</div>
             {field.city && <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{field.city}</div>}
           </div>
+        </div>
+
+        <div className="flex gap-2 mb-5">
+          <button
+            onClick={onEdit}
+            className="flex-1 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          >
+            <Pencil size={14} color={T.ash} />
+            <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>Edit Field Profile</span>
+          </button>
+          <button
+            onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${field.id}`, "_blank", "noopener,noreferrer")}
+            className="flex-1 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+            title="View this field the way a player sees it"
+          >
+            <ExternalLink size={14} color={T.ash} />
+            <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>View as Player</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
@@ -1363,7 +1373,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         </div>
 
         <Eyebrow>Field Rules (one per line)</Eyebrow>
-        <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" showCount />
+        <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
 
         <div className="mb-2 flex items-center justify-between">
           <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Chrono Limits</label>
@@ -1426,9 +1436,6 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
             </div>
             <textarea value={w.text} onChange={(e) => updateSavedWaiver(i, "text", e.target.value)} placeholder="Waiver text…" rows={5}
               className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash, resize: "none" }} />
-            <div className="text-[10px] mt-1 text-right" style={{ ...mono, color: (w.text || "").length > 500 ? T.alert : T.ashFaint }}>
-              {(w.text || "").length} characters
-            </div>
           </div>
         ))}
 
@@ -1481,15 +1488,6 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
           <ChevronLeft size={20} color={T.ash} />
         </button>
         <h1 className="flex-1 text-center text-[16px] font-semibold truncate px-2" style={{ ...display, color: T.ash }}>{ev.title}</h1>
-        {!ev.draft && (
-          <button
-            onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${ev.fieldId}`, "_blank", "noopener,noreferrer")}
-            className="w-9 h-9 flex items-center justify-center transition-transform duration-100 active:scale-90"
-            title="View this event's field the way a player sees it — there's no direct link to this one event yet, so it opens the field page"
-          >
-            <ExternalLink size={16} color={T.ash} />
-          </button>
-        )}
         <button onClick={onEdit} className="w-9 h-9 flex items-center justify-center transition-transform duration-100 active:scale-90">
           <Pencil size={16} color={T.ash} />
         </button>
@@ -1509,6 +1507,15 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
         <div className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
           {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${formatTimeStr(ev.startTime)}` : ""}{ev.endTime ? ` – ${formatTimeStr(ev.endTime)}` : ""}
         </div>
+        <button
+          onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${ev.fieldId}`, "_blank", "noopener,noreferrer")}
+          className="w-full mb-4 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          title="There's no direct link to this one event yet, so it opens the field page"
+        >
+          <ExternalLink size={14} color={T.ash} />
+          <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>View as Player</span>
+        </button>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
           <button
@@ -1872,6 +1879,16 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
       </div>
 
       <div className="px-6 pt-4" style={{ maxWidth: "100%" }}>
+        <button
+          onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${field.id}`, "_blank", "noopener,noreferrer")}
+          className="w-full mb-4 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          title="Opens the field's page — there's no direct link to one specific event yet"
+        >
+          <ExternalLink size={14} color={T.ash} />
+          <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>View as Player</span>
+        </button>
+
         <Eyebrow>Event Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -2045,7 +2062,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           </div>
         ))}
 
-        <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." showCount />
+        <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
         <Eyebrow>Waiver</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
@@ -2067,7 +2084,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             ))}
           </div>
         )}
-        <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder="Paste or write your field's waiver text here…" showCount />
+        <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder="Paste or write your field's waiver text here…" />
 
         <Eyebrow>Check-In Reward Patch</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
