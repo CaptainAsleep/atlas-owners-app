@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./leg
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, useOwnerFinancials, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useEventBookings, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -3209,21 +3209,24 @@ function RosterHubScreen({ events, eventsLoading, onOpenRoster }) {
   );
 }
 
-function RevenueBarChart({ buckets }) {
+function TrendBarChart({ buckets, formatValue = (v) => `$${(v / 100).toFixed(0)}`, ariaLabel = "Trend" }) {
   // Small hand-rolled inline SVG bar chart — no charting dependency in
   // this project, and a handful of monthly bars doesn't need one. Thin
   // bars, 4px rounded top corners (the "data end"), flush square bottom
   // anchored to the baseline, direct value + month labels since there
   // are never more than 6 bars — no legend needed for a single series.
+  // Generic over `formatValue` so the same chart shape serves both a
+  // dollar series (revenue) and a plain-count series (reservations)
+  // without duplicating this SVG for the second one.
   const W = 320, H = 118, padTop = 18, baseline = 88;
-  const maxCents = Math.max(1, ...buckets.map((b) => b.cents));
+  const maxValue = Math.max(1, ...buckets.map((b) => b.value));
   const slotW = W / buckets.length;
   const barW = Math.min(40, slotW * 0.55);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Revenue by month">
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={ariaLabel}>
       <line x1={0} y1={baseline} x2={W} y2={baseline} stroke={T.line} strokeWidth={1} />
       {buckets.map((b, i) => {
-        const barH = Math.max(3, (b.cents / maxCents) * (baseline - padTop));
+        const barH = Math.max(3, (b.value / maxValue) * (baseline - padTop));
         const x = i * slotW + (slotW - barW) / 2;
         const y = baseline - barH;
         return (
@@ -3231,7 +3234,7 @@ function RevenueBarChart({ buckets }) {
             <rect x={x} y={y} width={barW} height={barH} rx={4} ry={4} fill={T.accent} />
             {barH > 6 && <rect x={x} y={baseline - 4} width={barW} height={4} fill={T.accent} />}
             <text x={x + barW / 2} y={y - 4} textAnchor="middle" style={{ ...mono, fontSize: 9, fill: T.ashDim }}>
-              ${(b.cents / 100).toFixed(0)}
+              {formatValue(b.value)}
             </text>
             <text x={x + barW / 2} y={baseline + 14} textAnchor="middle" style={{ ...body, fontSize: 9, fill: T.ashFaint }}>
               {b.label}
@@ -3240,6 +3243,19 @@ function RevenueBarChart({ buckets }) {
         );
       })}
     </svg>
+  );
+}
+
+// Thin wrapper kept so the existing revenue call site (buckets shaped as
+// {label, cents}) needs no changes at all — this just adapts to
+// TrendBarChart's generic {label, value} shape.
+function RevenueBarChart({ buckets }) {
+  return (
+    <TrendBarChart
+      buckets={buckets.map((b) => ({ label: b.label, value: b.cents }))}
+      formatValue={(v) => `$${(v / 100).toFixed(0)}`}
+      ariaLabel="Revenue by month"
+    />
   );
 }
 
@@ -3295,6 +3311,77 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
     return Object.values(byField).sort((a, b) => b.cents - a.cents);
   })();
 
+  // Player-engagement metrics — reservations over time, check-in rate,
+  // a real interest-to-booking conversion, and new-vs-returning players.
+  // All four read from useOwnerReservationStats, not useOwnerFinancials,
+  // since they need every booking (paid and free) plus uid, neither of
+  // which that hook exposes (see its own comment for why it stays that
+  // way rather than being extended).
+  const { reservationBookings, reservationInterested, reservationStatsLoading } = useOwnerReservationStats(published);
+
+  // Reservations over time — every booking (paid or free), bucketed by
+  // when it was actually made (bookedAt), same last-6-months shape as
+  // the revenue chart above so the two read the same way side by side.
+  const reservationMonthBuckets = (() => {
+    const byMonth = {};
+    reservationBookings.forEach((b) => {
+      if (!b.bookedAt?.toDate) return;
+      const key = localDateStr(b.bookedAt.toDate()).slice(0, 7);
+      byMonth[key] = (byMonth[key] || 0) + 1;
+    });
+    return Object.keys(byMonth).sort().slice(-6).map((key) => ({
+      label: new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: "short" }),
+      value: byMonth[key],
+    }));
+  })();
+
+  // Check-in / no-show rate — restricted to events whose date has already
+  // passed. An upcoming event's bookings haven't had the chance to check
+  // in yet; counting them would drag the rate down for no real reason.
+  const pastReservationBookings = reservationBookings.filter((b) => (b.eventDate || "") < today);
+  const checkedInCount = pastReservationBookings.filter((b) => b.checkedIn).length;
+  const checkInRate = pastReservationBookings.length > 0 ? (checkedInCount / pastReservationBookings.length) * 100 : null;
+
+  // Interest-to-booking conversion — a real uid-set intersection between
+  // who favorited an event and who actually booked it, not
+  // bookedCount/interestCount (two counters that are independent of each
+  // other — favoriting was never a required step before booking, so that
+  // ratio isn't a meaningful conversion rate and can run over 100%).
+  const conversionStats = (() => {
+    const bookedUidsByEvent = {};
+    reservationBookings.forEach((b) => {
+      (bookedUidsByEvent[b.eventId] || (bookedUidsByEvent[b.eventId] = new Set())).add(b.uid);
+    });
+    let interestedTotal = 0, convertedTotal = 0;
+    reservationInterested.forEach((i) => {
+      interestedTotal += 1;
+      if (bookedUidsByEvent[i.eventId]?.has(i.uid)) convertedTotal += 1;
+    });
+    return { interestedTotal, rate: interestedTotal > 0 ? (convertedTotal / interestedTotal) * 100 : null };
+  })();
+
+  // New vs. returning players — a player's first-ever booking with this
+  // owner (earliest bookedAt, across every field they run) counts as
+  // "new," every booking after that as "returning." This is a per-booking
+  // rate, not a per-player one — a player with 5 bookings contributes 1
+  // new + 4 returning — which is the trade-off worth flagging: it weighs
+  // toward whoever books most often, rather than answering "what fraction
+  // of my distinct players have I seen twice."
+  const returningStats = (() => {
+    const byUid = {};
+    reservationBookings.forEach((b) => {
+      if (!b.bookedAt?.toDate) return;
+      (byUid[b.uid] || (byUid[b.uid] = [])).push(b);
+    });
+    let newCount = 0, returningCount = 0;
+    Object.values(byUid).forEach((list) => {
+      const sorted = [...list].sort((a, b) => a.bookedAt.toDate() - b.bookedAt.toDate());
+      sorted.forEach((_, i) => (i === 0 ? newCount++ : returningCount++));
+    });
+    const total = newCount + returningCount;
+    return { total, returningRate: total > 0 ? (returningCount / total) * 100 : null };
+  })();
+
   const exportFinancialsCsv = () => downloadCsv(
     "Atlas Financials.csv",
     ["Event", "Field", "Event Date", "Booked At", "Amount Paid", "Atlas Fee", "Net"],
@@ -3335,6 +3422,20 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
             )}
           </div>
         )}
+
+        {!reservationStatsLoading && reservationMonthBuckets.length > 0 && (
+          <div className="p-4 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <TrendingUp size={13} color={T.ashFaint} />
+              <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Reservations Over Time</span>
+            </div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{reservationBookings.length}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>Every booking, paid or free, by the month it was made</div>
+            <div className="mt-3">
+              <TrendBarChart buckets={reservationMonthBuckets} formatValue={(v) => String(v)} ariaLabel="Reservations by month" />
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Published Events</div>
@@ -3351,6 +3452,25 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
           <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Waiver Signatures</div>
             <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{activityLoading ? "…" : totalSignatures}</div>
+          </div>
+        </div>
+
+        <Eyebrow>Player Engagement</Eyebrow>
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Check-In Rate</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{reservationStatsLoading ? "…" : checkInRate == null ? "—" : `${checkInRate.toFixed(0)}%`}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>{reservationStatsLoading ? "" : checkInRate == null ? "No past events with bookings yet" : `${checkedInCount} of ${pastReservationBookings.length}, past events only`}</div>
+          </div>
+          <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Interest → Booking</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{reservationStatsLoading ? "…" : conversionStats.rate == null ? "—" : `${conversionStats.rate.toFixed(0)}%`}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>{reservationStatsLoading ? "" : conversionStats.rate == null ? "No interest data yet" : `Of ${conversionStats.interestedTotal} interested, actually booked`}</div>
+          </div>
+          <div className="p-4 col-span-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Returning Players</div>
+            <div className="text-[22px] font-semibold" style={{ ...display, color: T.ash }}>{reservationStatsLoading ? "…" : returningStats.returningRate == null ? "—" : `${returningStats.returningRate.toFixed(0)}%`}</div>
+            <div className="text-[9px] mt-0.5" style={{ ...body, color: T.ashFaint }}>{reservationStatsLoading ? "" : returningStats.returningRate == null ? "No booking history yet" : "Share of bookings made by someone who's booked with you before, across all your fields"}</div>
           </div>
         </div>
 

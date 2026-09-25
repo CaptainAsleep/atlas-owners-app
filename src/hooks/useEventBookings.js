@@ -151,3 +151,77 @@ export function useOwnerFinancials(events) {
 
   return { records, financialsLoading: loading };
 }
+
+// Real per-booking + per-interest records across every one of this
+// owner's events, for the reservation-side Analytics metrics
+// (reservations over time, check-in/no-show rate, interest-to-booking
+// conversion, new vs. returning players) — deliberately a separate hook
+// from useOwnerFinancials above rather than an extension of it, even
+// though both fetch the same per-event `bookings` subcollections. That
+// hook's paid-only filter and missing uid are exactly right for the
+// money reporting it powers; reshaping it to also serve these
+// count-based metrics risks the one code path the revenue numbers
+// depend on. The real trade-off: this doubles the Firestore reads
+// against `bookings` whenever the Analytics screen is open (once here,
+// once in useOwnerFinancials) — accepted in exchange for never touching
+// the financial hook.
+export function useOwnerReservationStats(events) {
+  const [bookings, setBookings] = useState([]);
+  const [interested, setInterested] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const eventIdsKey = events.map((e) => e.id).join(",");
+
+  useEffect(() => {
+    if (events.length === 0) {
+      setBookings([]);
+      setInterested([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      Promise.all(events.map((e) => getDocs(collection(db, "events", e.id, "bookings")).then((snap) => ({ event: e, snap })))),
+      Promise.all(events.map((e) => getDocs(collection(db, "events", e.id, "interested")).then((snap) => ({ event: e, snap })))),
+    ])
+      .then(([bookingResults, interestedResults]) => {
+        if (cancelled) return;
+        const allBookings = [];
+        bookingResults.forEach(({ event, snap }) => {
+          snap.docs.forEach((d) => {
+            const b = d.data();
+            allBookings.push({
+              eventId: event.id,
+              eventTitle: event.title,
+              fieldId: event.fieldId,
+              fieldName: event.fieldName,
+              eventDate: event.endDate || event.date,
+              uid: b.uid || d.id,
+              bookedAt: b.bookedAt,
+              checkedIn: !!b.checkedIn,
+              paid: !!b.paid,
+            });
+          });
+        });
+        const allInterested = [];
+        interestedResults.forEach(({ event, snap }) => {
+          snap.docs.forEach((d) => {
+            allInterested.push({ eventId: event.id, uid: d.data().uid || d.id });
+          });
+        });
+        setBookings(allBookings);
+        setInterested(allInterested);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("useOwnerReservationStats error:", err);
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+    // eventIdsKey, not events itself — same reasoning as useOwnerFinancials
+    // above (a fresh array reference every render would refetch constantly).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventIdsKey]);
+
+  return { reservationBookings: bookings, reservationInterested: interested, reservationStatsLoading: loading };
+}
