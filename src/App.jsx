@@ -3629,7 +3629,100 @@ const YEAR_IN_REVIEW_KEYFRAMES = `
   0% { transform: scaleX(0); }
   100% { transform: scaleX(1); }
 }
+@keyframes yirSparkOut {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: translateY(-72px) scale(0.3); opacity: 0; }
+}
+@keyframes yirConfettiFall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(380px) rotate(320deg); opacity: 0; }
+}
+@keyframes yirTwinkle {
+  0%, 100% { opacity: 0; transform: scale(0.6); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
 `;
+
+// Three small, hand-rolled flourishes (no canvas, no new dependency) —
+// sprinkled across cards rather than on every one, so the effect stays a
+// surprise rather than becoming visual noise. Identical to the player
+// app's own version (no shared code between the two apps). "fireworks"
+// marks the two big moments (the open and the sendoff); "confetti" and
+// "sparkle" alternate across the stat cards in between for variety.
+function YearInReviewEffect({ kind }) {
+  if (kind === "fireworks") {
+    const sparks = 14;
+    const colors = ["#FFFFFF", "#FFD54A", "#7EC8FF", "#FF8AC8"];
+    return (
+      <>
+        {Array.from({ length: sparks }).map((_, i) => {
+          const angle = (360 / sparks) * i;
+          const color = colors[i % colors.length];
+          const delay = 0.05 + (i % 4) * 0.05;
+          return (
+            <div key={i} className="absolute top-[38%] left-1/2" style={{ transform: `rotate(${angle}deg)` }}>
+              <div
+                style={{
+                  width: 5, height: 5, borderRadius: 999, background: color,
+                  boxShadow: `0 0 6px ${color}`,
+                  animation: `yirSparkOut 1.1s ease-out ${delay}s both`,
+                }}
+              />
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+  if (kind === "confetti") {
+    const pieces = 16;
+    const colors = ["#FFD54A", "#7EC8FF", "#FF8AC8", "#8AFFC1", "#FFFFFF"];
+    return (
+      <>
+        {Array.from({ length: pieces }).map((_, i) => {
+          const left = (i * 61) % 100;
+          const color = colors[i % colors.length];
+          const duration = 2.4 + (i % 5) * 0.35;
+          const delay = (i % 8) * 0.18;
+          return (
+            <div
+              key={i}
+              className="absolute -top-4"
+              style={{ left: `${left}%`, width: 6, height: 10, background: color, borderRadius: 1, animation: `yirConfettiFall ${duration}s linear ${delay}s infinite` }}
+            />
+          );
+        })}
+      </>
+    );
+  }
+  if (kind === "sparkle") {
+    const spots = [
+      { top: "18%", left: "20%" }, { top: "22%", left: "78%" },
+      { top: "68%", left: "16%" }, { top: "72%", left: "82%" },
+      { top: "10%", left: "50%" },
+    ];
+    return (
+      <>
+        {spots.map((pos, i) => (
+          <div key={i} className="absolute" style={{ ...pos, fontSize: 16, color: "#FFFFFF", animation: `yirTwinkle 1.8s ease-in-out ${i * 0.3}s infinite` }}>
+            ✦
+          </div>
+        ))}
+      </>
+    );
+  }
+  return null;
+}
+
+// intro/closing always get the big fireworks moment; everything in
+// between alternates between the two lighter effects so no two adjacent
+// stat cards look the same.
+function effectForCard(card, index) {
+  if (card.intro || card.closing) return "fireworks";
+  return index % 2 === 1 ? "sparkle" : "confetti";
+}
 
 function OwnerYearInReviewScreen({ onBack, events, year }) {
   const [index, setIndex] = useState(0);
@@ -3733,31 +3826,36 @@ function OwnerYearInReviewScreen({ onBack, events, year }) {
         className="h-full w-full flex flex-col items-center justify-center px-8 text-center relative z-0"
         style={{ pointerEvents: "none", animation: "yirCardIn 0.4s ease-out" }}
       >
-        {card.intro && (
-          <>
-            <div className="text-[15px] font-semibold uppercase mb-2" style={{ ...body, color: "rgba(255,255,255,0.6)", letterSpacing: "0.08em" }}>Atlas</div>
-            <div className="text-[56px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1)" }}>{card.title}</div>
-            <div className="text-[18px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
-          </>
-        )}
-        {card.closing && (
-          <>
-            <div className="text-[26px] font-bold mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.title}</div>
-            <div className="text-[16px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
-          </>
-        )}
-        {!card.intro && !card.closing && (
-          <>
-            <div
-              className="text-[64px] font-bold leading-none mb-3"
-              style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1), yirGlow 2.4s ease-in-out infinite 0.55s" }}
-            >
-              {card.big}
-            </div>
-            <div className="text-[20px] font-semibold mb-2" style={{ ...display, color: "#FFFFFF" }}>{card.label}</div>
-            {card.sub && <div className="text-[14px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>{card.sub}</div>}
-          </>
-        )}
+        <div className="absolute inset-0 overflow-hidden" style={{ zIndex: 0 }}>
+          <YearInReviewEffect kind={effectForCard(card, index)} />
+        </div>
+        <div className="relative flex flex-col items-center" style={{ zIndex: 1 }}>
+          {card.intro && (
+            <>
+              <div className="text-[15px] font-semibold uppercase mb-2" style={{ ...body, color: "rgba(255,255,255,0.6)", letterSpacing: "0.08em" }}>Atlas</div>
+              <div className="text-[56px] font-bold leading-none mb-3" style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1)" }}>{card.title}</div>
+              <div className="text-[18px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
+            </>
+          )}
+          {card.closing && (
+            <>
+              <div className="text-[26px] font-bold mb-3" style={{ ...display, color: "#FFFFFF" }}>{card.title}</div>
+              <div className="text-[16px]" style={{ ...body, color: "rgba(255,255,255,0.85)" }}>{card.subtitle}</div>
+            </>
+          )}
+          {!card.intro && !card.closing && (
+            <>
+              <div
+                className="text-[64px] font-bold leading-none mb-3"
+                style={{ ...display, color: "#FFFFFF", animation: "yirNumberPop 0.55s cubic-bezier(0.34,1.56,0.64,1), yirGlow 2.4s ease-in-out infinite 0.55s" }}
+              >
+                {card.big}
+              </div>
+              <div className="text-[20px] font-semibold mb-2" style={{ ...display, color: "#FFFFFF" }}>{card.label}</div>
+              {card.sub && <div className="text-[14px]" style={{ ...body, color: "rgba(255,255,255,0.7)" }}>{card.sub}</div>}
+            </>
+          )}
+        </div>
       </div>
 
       {!isFirst && (
