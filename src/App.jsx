@@ -458,7 +458,7 @@ function LoginScreen({ signIn, signUp }) {
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onOpenYearInReview, onLogout, uid }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onOpenYearInReview, onLogout }) {
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && !e.deleted && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.filter((e) => !e.deleted).reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -484,11 +484,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
-        {/* TEMPORARY, for Michael to test the banner before the real
-            Dec 26 window — bypasses the date gate for this one account
-            only. Remove this uid check once testing is done;
-            isReviewWindow() itself is untouched. */}
-        {(isReviewWindow() || uid === "lg4HMLTJvsPfSEN1pvNhMV4fbct1") && (
+        {isReviewWindow() && (
           <button
             onClick={onOpenYearInReview}
             className="w-full mb-5 p-4 flex items-center gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
@@ -5027,7 +5023,6 @@ export default function App() {
       content = (
         <DashboardScreen
           profile={profile}
-          uid={user?.uid}
           myFields={myFields}
           myFieldsLoading={myFieldsLoading}
           pendingFields={pendingFields}
