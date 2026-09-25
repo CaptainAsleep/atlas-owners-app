@@ -98,6 +98,16 @@ function parsePrice(str) {
   const m = (str || "").match(/[\d.]+/);
   return m ? parseFloat(m[0]) : null;
 }
+// True when a price string carries no real information — unset,
+// whitespace, or just a leftover currency symbol with nothing after it.
+// Used to default the "Free event" checkbox for an existing event (one
+// saved before that checkbox existed, or from before this field's default
+// was fixed, can still have a literal "$" sitting in price) and, on the
+// player side (same helper, ported to atlas-players-app/src/App.jsx), to
+// show "Free" instead of a bare "$".
+function isBlankPriceText(price) {
+  return !price || !/[^\s$]/.test(price);
+}
 
 // Defensive display formatting — if a price was ever stored as a bare
 // number (no $ prefix), show it with one rather than a confusing bare
@@ -150,7 +160,7 @@ async function shareFieldLink(field) {
 }
 
 function displayPrice(price) {
-  if (!price) return price;
+  if (isBlankPriceText(price)) return "Free";
   const trimmed = String(price).trim();
   return /^\d/.test(trimmed) ? `$${trimmed}` : trimmed;
 }
@@ -1430,7 +1440,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested</div>
           </div>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
-            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{ev.price ? displayPrice(ev.price) : "—"}</div>
+            <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{displayPrice(ev.price)}</div>
             <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Price</div>
           </div>
         </div>
@@ -1527,7 +1537,25 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   const [startTime, setStartTime] = useState(existing?.startTime || "");
   const [endTime, setEndTime] = useState(existing?.endTime || "");
   const [briefingTime, setBriefingTime] = useState(existing?.briefingTime || "");
-  const [price, setPrice] = useState(existing?.price || "$");
+  const [price, setPrice] = useState(existing?.price || "");
+  // Checkbox is the deliberate signal for "this event doesn't charge" —
+  // reusing the existing blank-price-means-free behavior underneath
+  // rather than adding a new persisted field. Defaults checked when
+  // editing an event whose saved price is already blank-ish (covers
+  // events saved with the old "$" default too), unchecked for a brand
+  // new event so an owner has to consciously opt into free rather than
+  // silently getting it by leaving a field untouched.
+  const [isFreeEvent, setIsFreeEvent] = useState(!!existing && isBlankPriceText(existing?.price));
+  const priceBeforeFreeToggle = React.useRef(price);
+  const toggleFreeEvent = (checked) => {
+    setIsFreeEvent(checked);
+    if (checked) {
+      priceBeforeFreeToggle.current = price;
+      setPrice("");
+    } else {
+      setPrice(priceBeforeFreeToggle.current || "");
+    }
+  };
   const [maxCapacity, setMaxCapacity] = useState(existing?.maxCapacity || "");
   const [type, setType] = useState(existing?.type || "OUTDOOR");
   const [description, setDescription] = useState(existing?.description || "");
@@ -1557,7 +1585,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   // nothing to compare against, so it's always considered "changed."
   const [snapshot, setSnapshot] = useState({
     title: existing?.title || "", date: existing?.date || "", endDate: existing?.endDate || "",
-    startTime: existing?.startTime || "", endTime: existing?.endTime || "", briefingTime: existing?.briefingTime || "", price: existing?.price || "$", maxCapacity: existing?.maxCapacity || "",
+    startTime: existing?.startTime || "", endTime: existing?.endTime || "", briefingTime: existing?.briefingTime || "", price: existing?.price || "", maxCapacity: existing?.maxCapacity || "",
     type: existing?.type || "OUTDOOR", description: existing?.description || "", imageUrl: existing?.imageUrl || null,
   });
   const hasChanges = !existing ||
@@ -1689,7 +1717,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     startTime: startTime || null,
     endTime: endTime || null,
     briefingTime: briefingTime || null,
-    price: price || null,
+    price: isFreeEvent ? null : (price || null),
     // One optional group of player-picked, differently-priced choices
     // (weapon class, BB weight, etc.) — null for a normal flat-price or
     // free event. Only choices with both a label and a price are kept;
@@ -1871,20 +1899,33 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
         </div>
 
         <Eyebrow>Pricing & Capacity</Eyebrow>
+        <label className="flex items-center gap-2 mb-3 text-[12px]" style={{ ...body, color: T.ashDim }}>
+          <input type="checkbox" checked={isFreeEvent} onChange={(e) => toggleFreeEvent(e.target.checked)} />
+          This is a free event (no entry fee)
+        </label>
         <div className="flex gap-2">
           <div className="flex-1">
-            <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="25 (or clear and type 'Price varies')" />
+            {isFreeEvent ? (
+              <div className="mb-3">
+                <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Entry Cost</label>
+                <div className="w-full px-3 py-2.5 text-[14px]" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: T.rTight, color: T.ashFaint, opacity: 0.7 }}>
+                  Free — players won't be charged an entry fee
+                </div>
+              </div>
+            ) : (
+              <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="25 (or clear and type 'Price varies')" />
+            )}
           </div>
           <div className="flex-1">
             <TextField label="Max Capacity" value={maxCapacity} onChange={setMaxCapacity} placeholder="120" type="number" />
           </div>
         </div>
-        {projectedRevenue && (
+        {!isFreeEvent && projectedRevenue && (
           <p className="text-[12px] mb-3 -mt-1" style={{ ...body, color: T.ashDim }}>
             Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${projectedRevenue}</span> — entry cost × capacity, not a real payment yet
           </p>
         )}
-        {price.trim() && parsePrice(price) === null && priceOptionsChoices.filter((c) => c.label.trim() && c.price.trim()).length === 0 && (
+        {!isFreeEvent && price.trim() && parsePrice(price) === null && priceOptionsChoices.filter((c) => c.label.trim() && c.price.trim()).length === 0 && (
           <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.alert }}>
             Heads up — since "{price.trim()}" isn't a plain number, this event won't collect any payment in the app right now. Use Price Options below if the real cost varies by player, or enter a plain number (e.g. 25) for a flat price.
           </p>
@@ -2886,7 +2927,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                     )}
                     <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
                   </div>
-                  {ev.price && <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>}
+                  <div className="text-[12px] font-semibold" style={{ ...mono, color: T.accent }}>{displayPrice(ev.price)}</div>
                 </div>
                 <div className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
                   {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${formatTimeStr(ev.startTime)}` : ""}{ev.endTime ? ` – ${formatTimeStr(ev.endTime)}` : ""}
