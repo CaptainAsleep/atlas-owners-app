@@ -91,76 +91,100 @@ export function useOwnerEventActions() {
   return { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId };
 }
 
-// Finds the owner's oldest finished-but-not-yet-celebrated event that
-// actually had real money change hands, and computes what they'll receive
-// from Atlas for it — the data behind the one-time "congrats on a
-// successful event" popup shown on next login. Deliberately surfaces one
-// event at a time (oldest first) rather than dumping a pile of past
-// events on someone who hasn't logged in for a while; dismissing marks
-// that event's payoutNoticeShown so it never resurfaces, and whatever's
-// next in line takes its place automatically on the next render.
-export function usePayoutCelebration(events) {
-  const [candidateId, setCandidateId] = useState(null);
-  const [revenueCents, setRevenueCents] = useState(0);
+// Finds the one just-finished event to show on the Dashboard's
+// After-Action Report banner - replaces the old usePayoutCelebration
+// popup entirely (2026-09-28, per Michael: one richer touchpoint
+// instead of two overlapping "your event just happened" surfaces).
+//
+// "Just finished" means (endDate||date) is exactly yesterday, UTC ISO
+// date string - same convention usePayoutCelebration used, not
+// localDateStr() (which the Dashboard's own upcoming-filter uses for a
+// different purpose). The banner is a full-calendar-day window, not a
+// literal 24-hour timer - startTime/endTime are owner-typed free text,
+// not strict picker values, so a precise timestamp comparison would be
+// fragile.
+//
+// Real edge case: two events sharing the same end date (e.g. a field
+// running 9am-2pm then 3pm-8pm the same day). Per Michael: show exactly
+// one banner, the newer event replaces the older. Since every eligible
+// event here already shares the identical "yesterday" date by
+// construction, this only ever matters for that same-day case - resolved
+// by a best-effort compare of endTime/startTime free text, falling back
+// to array order (stable but arbitrary, same order useOwnerEvents
+// already returns) when unparseable.
+//
+// Zero reservations -> no banner at all (per Michael: don't want to
+// highlight that nobody showed up). This is a different skip condition
+// than the old usePayoutCelebration's zero-*revenue* skip - a free event
+// with real signups but no money involved still gets a banner here.
+function parseTimeToMinutes(str) {
+  const m = (str || "").match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const ampm = m[3]?.toLowerCase();
+  if (Number.isNaN(h) || h > 23) return null;
+  if (ampm === "pm" && h < 12) h += 12;
+  if (ampm === "am" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+export function useAfterActionCandidate(events) {
+  const [banner, setBanner] = useState(null); // null | { event, reservedCount, checkedInCount, revenueCents }
   const [checking, setChecking] = useState(false);
-  // Belt-and-suspenders against the live Firestore listener's write not
-  // having round-tripped back into `events` yet the instant dismiss()
-  // fires — without this, the same just-dismissed event could get picked
-  // again as "next candidate" for one render before payoutNoticeShown
-  // actually shows up on its doc.
-  const [dismissedIds, setDismissedIds] = useState(() => new Set());
 
-  // Today, UTC-based date string — same convention already used
-  // elsewhere in this app (e.g. FieldOverviewScreen) for "is this event
-  // in the past" comparisons.
   const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const candidates = events
-    .filter(
-      (e) =>
-        !e.draft &&
-        !e.deleted &&
-        !e.canceled &&
-        !e.payoutNoticeShown &&
-        !dismissedIds.has(e.id) &&
-        (e.endDate || e.date) &&
-        (e.endDate || e.date) < today
-    )
-    .sort((a, b) => (a.endDate || a.date).localeCompare(b.endDate || b.date));
-  const candidatesKey = candidates.map((e) => e.id).join(",");
+  const eligible = events.filter(
+    (e) => !e.draft && !e.deleted && !e.canceled && (e.endDate || e.date) === yesterday
+  );
+  // Newest first: same-day tiebreak by end/start time text, else stable
+  // array order (already date-sorted by useOwnerEvents, so a same-date
+  // tie preserves whatever order Firestore returned them in).
+  const sorted = [...eligible].sort((a, b) => {
+    const aTime = parseTimeToMinutes(a.endTime || a.startTime);
+    const bTime = parseTimeToMinutes(b.endTime || b.startTime);
+    if (aTime != null && bTime != null) return bTime - aTime;
+    return 0;
+  });
+  const candidate = sorted[0] || null;
+  const candidateId = candidate?.id || null;
 
   useEffect(() => {
-    if (candidateId || candidates.length === 0) return;
-    const next = candidates[0];
+    if (!candidateId) {
+      setBanner(null);
+      return;
+    }
     let cancelled = false;
     setChecking(true);
-    getDocs(collection(db, "events", next.id, "bookings"))
+    getDocs(collection(db, "events", candidateId, "bookings"))
       .then((snap) => {
         if (cancelled) return;
-        // Same formula as useOwnerBookingRevenue — the owner's own share
-        // of each paid booking (full price minus Atlas's booking fee).
-        let cents = 0;
+        if (snap.empty) {
+          // Zero reservations - suppress the banner entirely, per
+          // Michael, rather than falling back to an older event still
+          // inside its own visible window.
+          setBanner(null);
+          return;
+        }
+        let reservedCount = 0;
+        let checkedInCount = 0;
+        let revenueCents = 0;
         snap.docs.forEach((d) => {
           const b = d.data();
-          if (!b.paid || typeof b.amountPaidCents !== "number") return;
-          cents += b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0);
+          reservedCount += 1;
+          if (b.checkedIn) checkedInCount += 1;
+          if (b.paid && typeof b.amountPaidCents === "number") {
+            revenueCents += b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0);
+          }
         });
-        if (cents > 0) {
-          setCandidateId(next.id);
-          setRevenueCents(cents);
-        } else {
-          // Nothing was actually paid for this one (a free event, or
-          // nobody booked) — silently mark it handled instead of showing
-          // an anticlimactic "$0.00, congrats!" popup. Also added to
-          // dismissedIds immediately, same as the real dismiss path below —
-          // otherwise this same zero-revenue event could get re-picked as
-          // "next candidate" on the next render, before the Firestore
-          // listener's update round-trips back into `events`.
-          setDismissedIds((prev) => new Set(prev).add(next.id));
-          updateDoc(doc(db, "events", next.id), { payoutNoticeShown: true }).catch(() => {});
-        }
+        setBanner({ event: candidate, reservedCount, checkedInCount, revenueCents });
       })
-      .catch((err) => console.error("usePayoutCelebration revenue check failed:", err))
+      .catch((err) => {
+        console.error("useAfterActionCandidate bookings check failed:", err);
+        if (!cancelled) setBanner(null);
+      })
       .finally(() => {
         if (!cancelled) setChecking(false);
       });
@@ -168,27 +192,7 @@ export function usePayoutCelebration(events) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidatesKey, candidateId]);
+  }, [candidateId]);
 
-  const celebrationEvent = candidateId ? events.find((e) => e.id === candidateId) || null : null;
-
-  async function dismissCelebration() {
-    if (!candidateId) return;
-    const id = candidateId;
-    setDismissedIds((prev) => new Set(prev).add(id));
-    setCandidateId(null);
-    setRevenueCents(0);
-    try {
-      await updateDoc(doc(db, "events", id), { payoutNoticeShown: true });
-    } catch (err) {
-      console.error("usePayoutCelebration dismiss failed:", err);
-    }
-  }
-
-  return {
-    celebrationEvent,
-    celebrationRevenueCents: revenueCents,
-    celebrationChecking: checking,
-    dismissCelebration,
-  };
+  return { afterActionBanner: banner, afterActionChecking: checking };
 }

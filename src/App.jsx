@@ -8,9 +8,9 @@ import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
 import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./legalText";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
-import { useOwnerEvents, useOwnerEventActions, usePayoutCelebration } from "./hooks/useOwnerEvents";
+import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useEventBookings, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -471,6 +471,8 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
     return sum + (p && cap ? p * cap : 0);
   }, 0);
 
+  const { afterActionBanner } = useAfterActionCandidate(events);
+
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
@@ -484,6 +486,23 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
       </div>
 
       <div className="px-6">
+        {afterActionBanner && (
+          <button
+            onClick={() => onOpenEvent(afterActionBanner.event)}
+            className="w-full mb-5 p-4 flex items-center gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: "linear-gradient(135deg, #0F7A52, #0B5C3E)", borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          >
+            <PartyPopper size={18} color="#FFFFFF" />
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold" style={{ ...display, color: "#FFFFFF" }}>After-Action Report: {afterActionBanner.event.title}</div>
+              <div className="text-[11px]" style={{ ...body, color: "rgba(255,255,255,0.75)" }}>
+                {afterActionBanner.reservedCount} reserved · {afterActionBanner.checkedInCount} checked in
+                {afterActionBanner.revenueCents > 0 ? ` · $${(afterActionBanner.revenueCents / 100).toFixed(2)}` : ""}
+              </div>
+            </div>
+            <ChevronRight size={16} color="#FFFFFF" />
+          </button>
+        )}
         {isReviewWindow() && (
           <button
             onClick={onOpenYearInReview}
@@ -1539,7 +1558,58 @@ const GAME_TYPES = [
 // summary with real stats, not straight into the edit form. Mirrors
 // FieldOverviewScreen's exact pattern: view first, edit is one tap away
 // via the pencil icon.
-function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
+function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const isPast = !ev.draft && !!(ev.endDate || ev.date) && (ev.endDate || ev.date) < today;
+
+  // After-Action Report data - only fetched for a past, non-draft event
+  // (each hook's own falsy-id/empty-events short-circuit makes this free
+  // for an upcoming event's overview). New-vs-returning specifically is
+  // the expensive one (the owner's entire multi-event booking history) -
+  // deliberately gated the same way, per the 2026-09-28 scoping's
+  // Decision #4, rather than fetched unconditionally.
+  const { bookings: aarBookings, bookingsLoading: aarBookingsLoading } = useEventBookings(isPast ? ev.id : null);
+  const { signatures: aarSignatures } = useEventWaivers(isPast ? ev.id : null);
+  const { interestedCount: aarInterestedCount } = useEventInterestedCount(isPast ? ev.id : null);
+  const { reservationBookings: aarAllBookings } = useOwnerReservationStats(isPast ? (allMyEvents || []) : []);
+
+  let aarStats = null;
+  if (isPast && !aarBookingsLoading) {
+    const reservedCount = aarBookings.length;
+    const checkedInCount = aarBookings.filter((b) => b.checkedIn).length;
+    const revenueCents = aarBookings.reduce((sum, b) => {
+      if (!b.paid || typeof b.amountPaidCents !== "number") return sum;
+      return sum + (b.amountPaidCents - (typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0));
+    }, 0);
+    const rentalCounts = {};
+    aarBookings.forEach((b) => {
+      (b.selectedRentals || []).forEach((r) => {
+        rentalCounts[r.name] = (rentalCounts[r.name] || 0) + 1;
+      });
+    });
+    const choiceCounts = {};
+    aarBookings.forEach((b) => {
+      if (b.selectedChoiceLabel) choiceCounts[b.selectedChoiceLabel] = (choiceCounts[b.selectedChoiceLabel] || 0) + 1;
+    });
+    const classified = classifyReturning(aarAllBookings).filter((b) => b.eventId === ev.id);
+    const returningCount = classified.filter((b) => b.isReturning).length;
+
+    aarStats = {
+      reservedCount,
+      checkedInCount,
+      noShowCount: reservedCount - checkedInCount,
+      checkInRate: reservedCount > 0 ? (checkedInCount / reservedCount) * 100 : null,
+      revenueCents,
+      waiverCount: aarSignatures.length,
+      interestedCount: aarInterestedCount,
+      rentalCounts,
+      choiceCounts,
+      returningCount,
+      newCount: classified.length - returningCount,
+      classifiedCount: classified.length,
+    };
+  }
+
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
@@ -1672,6 +1742,85 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster }) {
               <FileSignature size={15} color={T.ashDim} />
               <span className="text-[13px]" style={{ ...body, color: T.ashDim }}>Required for this event</span>
             </div>
+          </>
+        )}
+
+        {isPast && aarStats && (
+          <>
+            <Eyebrow>After-Action Report</Eyebrow>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{aarStats.reservedCount}</div>
+                <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Reserved</div>
+              </div>
+              <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[18px] font-semibold" style={{ ...display, color: T.good }}>{aarStats.checkedInCount}</div>
+                <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Checked In</div>
+              </div>
+              <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[18px] font-semibold" style={{ ...display, color: T.alert }}>{aarStats.noShowCount}</div>
+                <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>No-Shows</div>
+              </div>
+            </div>
+
+            <div className="p-4 mb-3" style={{ borderRadius: T.rHero, background: "linear-gradient(135deg,#0e2c47,#1c3f63)", boxShadow: "0 10px 24px -8px rgba(0,44,72,0.35)" }}>
+              <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: "rgba(255,255,255,0.6)", letterSpacing: "0.04em" }}>Real Revenue (Your Share)</div>
+              <div className="text-[26px] font-semibold" style={{ ...display, color: "#fff" }}>${(aarStats.revenueCents / 100).toFixed(2)}</div>
+              {aarStats.checkInRate != null && (
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: "rgba(255,255,255,0.55)" }}>{aarStats.checkInRate.toFixed(0)}% check-in rate</div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>{aarStats.waiverCount}</div>
+                <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Waiver Signatures</div>
+              </div>
+              <div className="p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>
+                  {aarStats.interestedCount}{aarStats.interestedCount > 0 ? ` → ${aarStats.reservedCount}` : ""}
+                </div>
+                <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Interested → Reserved</div>
+              </div>
+            </div>
+
+            {aarStats.classifiedCount > 0 && (
+              <div className="p-3 mb-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>New vs. Returning</div>
+                <div className="flex items-center justify-between text-[12px]" style={{ ...body, color: T.ashDim }}>
+                  <span>{aarStats.newCount} new</span>
+                  <span>{aarStats.returningCount} returning</span>
+                </div>
+              </div>
+            )}
+
+            {Object.keys(aarStats.choiceCounts).length > 0 && (
+              <div className="p-3 mb-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Price Options Chosen</div>
+                <div className="flex flex-col gap-1.5">
+                  {Object.entries(aarStats.choiceCounts).map(([label, count]) => (
+                    <div key={label} className="flex items-center justify-between text-[12px]" style={{ ...body, color: T.ashDim }}>
+                      <span>{label}</span>
+                      <span style={{ ...mono, color: T.accent, fontWeight: 600 }}>{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Object.keys(aarStats.rentalCounts).length > 0 && (
+              <div className="p-3 mb-5" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Rentals Selected</div>
+                <div className="flex flex-col gap-1.5">
+                  {Object.entries(aarStats.rentalCounts).map(([name, count]) => (
+                    <div key={name} className="flex items-center justify-between text-[12px]" style={{ ...body, color: T.ashDim }}>
+                      <span>{name}</span>
+                      <span style={{ ...mono, color: T.accent, fontWeight: 600 }}>{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -4560,7 +4709,7 @@ function formatPayoutSchedule(schedule) {
 }
 
 // Deliberately a small dismissable-by-ignoring floating bar, not a modal
-// like PayoutCelebrationModal below — a new build being ready is never
+// — a new build being ready is never
 // urgent enough to block whatever the owner is doing (managing a field,
 // checking a player in at the gate), so this never force-reloads on its
 // own. It only reloads when the owner themselves taps Refresh.
@@ -4590,65 +4739,6 @@ function UpdateAvailableToast({ onRefresh }) {
         <RotateCcw size={13} />
         Refresh
       </button>
-    </div>
-  );
-}
-
-// The one-time "congrats on a successful event" popup — surfaced by
-// usePayoutCelebration once per real (paid) event, the next time the
-// owner logs in after it wraps up. Deliberately no dismiss-by-tapping-the-
-// scrim here, unlike the confirm dialogs elsewhere in this file — this is
-// the owner's actual payout amount, not a routine yes/no, so it only goes
-// away once they've explicitly acknowledged it.
-function PayoutCelebrationModal({ event, revenueCents, payoutSchedule, onDismiss }) {
-  const [dismissing, setDismissing] = useState(false);
-
-  const handleDismiss = async () => {
-    setDismissing(true);
-    try {
-      await onDismiss();
-    } finally {
-      setDismissing(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2100 }}>
-      <div className="w-full p-6" style={{ background: T.panel, borderRadius: 10, maxWidth: 380 }}>
-        <div className="w-11 h-11 mb-3 flex items-center justify-center" style={{ background: "rgba(15,122,82,0.12)", borderRadius: 999 }}>
-          <PartyPopper size={22} color={T.good} />
-        </div>
-        <div className="text-[17px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Congrats on a successful event!</div>
-        <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-          "{event.title}" at {event.fieldName} wrapped up on {event.endDate || event.date}.
-        </p>
-
-        <div className="p-4 mb-4 text-center" style={{ background: T.panelAlt, borderRadius: 8, border: `1px solid ${T.line}` }}>
-          <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>You'll receive</div>
-          <div className="text-[28px] font-semibold" style={{ ...display, color: T.good }}>${(revenueCents / 100).toFixed(2)}</div>
-        </div>
-
-        <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-          Payouts are {formatPayoutSchedule(payoutSchedule)}.
-        </p>
-
-        <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>
-          If you have any feedback or experienced any bugs during this event, feel free to reach out to us on{" "}
-          <a href="https://discord.gg/hR8EntGsq" target="_blank" rel="noopener noreferrer" style={{ color: T.accent, fontWeight: 600, textDecoration: "none" }}>
-            our Discord
-          </a>
-          .
-        </p>
-
-        <button
-          onClick={handleDismiss}
-          disabled={dismissing}
-          className="w-full py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-[0.98]"
-          style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: dismissing ? 0.6 : 1 }}
-        >
-          {dismissing ? "\u2026" : "Nice!"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -4834,7 +4924,6 @@ export default function App() {
   const myFieldIds = myFields.map((f) => f.id);
   const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
   const { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
-  const { celebrationEvent, celebrationRevenueCents, dismissCelebration } = usePayoutCelebration(allMyEvents);
   const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
@@ -4863,16 +4952,6 @@ export default function App() {
   if (authLoading) {
     return <LoadingScreen />;
   }
-
-  // Whether the owner is logged in, past the legal-agreement screen, and
-  // past the fee-model hard-gate — the payout celebration popup only
-  // makes sense once someone's actually looking at their real dashboard,
-  // not stacked on top of "accept our terms" or "pick a fee model."
-  const pastOnboardingGates =
-    !!user &&
-    !!profile &&
-    profile.acceptedTermsVersion === CURRENT_TERMS_VERSION &&
-    !(myFields.length > 0 && !profile.comped && !profile.feeModel);
 
   let content;
   let showNav = false;
@@ -4945,6 +5024,7 @@ export default function App() {
         onBack={closeOverlay}
         onEdit={() => openEventEdit(activeField, editingEvent)}
         onOpenRoster={openRoster}
+        allMyEvents={allMyEvents}
       />
     );
   } else if (overlay === "eventEdit" && activeField) {
@@ -5057,14 +5137,6 @@ export default function App() {
       <div className="flex-1 min-h-0 relative">
         {content}
         {showNav && <OwnerBottomNav active={activeTab} onNavigate={setActiveTab} />}
-        {pastOnboardingGates && celebrationEvent && (
-          <PayoutCelebrationModal
-            event={celebrationEvent}
-            revenueCents={celebrationRevenueCents}
-            payoutSchedule={profile?.payoutSchedule}
-            onDismiss={dismissCelebration}
-          />
-        )}
         {needRefresh && <UpdateAvailableToast onRefresh={refreshNow} />}
       </div>
     </div>

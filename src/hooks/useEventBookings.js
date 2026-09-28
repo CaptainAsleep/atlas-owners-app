@@ -33,6 +33,41 @@ export function useEventBookings(eventId) {
   return { bookings, bookingsLoading: loading };
 }
 
+// One-shot count of who favorited/expressed interest in one event - used
+// by the After-Action Report's Interested -> Reserved conversion figure
+// (2026-09-28). A live listener isn't needed here: this only ever reads
+// for a past event on a screen someone deliberately opened, not
+// something that needs to update while they're staring at it.
+export function useEventInterestedCount(eventId) {
+  const [interestedCount, setInterestedCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!eventId) {
+      setInterestedCount(0);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    getDocs(collection(db, "events", eventId, "interested"))
+      .then((snap) => {
+        if (!cancelled) setInterestedCount(snap.size);
+      })
+      .catch((err) => {
+        console.error("useEventInterestedCount error:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  return { interestedCount, interestedCountLoading: loading };
+}
+
 // Shared by both the QR scanner and manual search-based check-in, so
 // there's exactly one place that knows how a check-in actually gets
 // written (both mirrored copies — see the comment below) rather than two
