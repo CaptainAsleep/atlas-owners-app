@@ -2642,6 +2642,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   const [confirmGrant, setConfirmGrant] = useState(null); // { uid, name, booking }
   const [grantBusy, setGrantBusy] = useState(false);
   const [grantError, setGrantError] = useState("");
+  const [selectedSignature, setSelectedSignature] = useState(null);
 
   // Display-only preview — the real amount is computed server-side in
   // grantVoucherToPlayer (resolveVoucherAmountCents, functions/index.js)
@@ -2673,7 +2674,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
     }
   };
 
-  const renderPersonRow = (uid, name, dateValue, checkedIn) => {
+  const renderPersonRow = (uid, name, dateValue, checkedIn, onViewWaiver) => {
     const isBanned = bannedUids.has(uid);
     // Cross-references by uid so the field owner sees a real, unambiguous
     // name to call out — callsigns alone aren't unique (multiple players
@@ -2721,6 +2722,15 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           )}
         </div>
         <div className="flex flex-col items-end gap-1.5">
+          {onViewWaiver && (
+            <button
+              onClick={onViewWaiver}
+              className="px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-transform duration-100 active:scale-95"
+              style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}
+            >
+              <FileSignature size={12} /> View Waiver
+            </button>
+          )}
           {matchingBooking?.paid && typeof matchingBooking.amountPaidCents === "number" && matchingBooking.amountPaidCents > 0 && (
             <button
               onClick={() => setConfirmGrant({ uid, name, booking: matchingBooking })}
@@ -2908,7 +2918,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No signatures yet.</p>
         ) : (
           <div className="mb-5">
-            {signatures.map((s, i) => renderPersonRow(s.uid || `sig-${i}`, s.signedName, s.signedAt))}
+            {signatures.map((s, i) => renderPersonRow(s.uid || `sig-${i}`, s.signedName, s.signedAt, false, () => setSelectedSignature(s)))}
           </div>
         )}
 
@@ -2964,6 +2974,14 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           </div>
         </div>
       )}
+
+      {selectedSignature && (
+        <SignedWaiverModal
+          activity={selectedSignature}
+          event={event}
+          onClose={() => setSelectedSignature(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2994,6 +3012,16 @@ function SignedWaiverModal({ activity, event, onClose }) {
           <div className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{activity.signedName}</div>
             {signedAtStr && <div className="text-[11px] mt-0.5" style={{ ...mono, color: T.ashFaint }}>{signedAtStr}</div>}
+          </div>
+
+          <div className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <Check size={13} color={T.good} />
+              <div className="text-[12px] font-semibold" style={{ ...display, color: T.ash }}>Proof of signature</div>
+            </div>
+            <p className="text-[11px]" style={{ ...body, color: T.ashDim }}>
+              {activity.signedName}'s name came straight from their own Atlas account, not typed in freehand, and this record only exists because they scrolled through the full waiver and checked an explicit agreement box before submitting. Once created, it can't be edited or deleted by anyone — not them, not Atlas. Under the U.S. ESIGN Act, that's a legally valid electronic signature. Whether a specific waiver's wording holds up is a separate question that depends on your state's law and the waiver's own terms — worth a quick check with your own attorney if it's ever actually tested.
+            </p>
           </div>
 
           {versionMismatch && (
