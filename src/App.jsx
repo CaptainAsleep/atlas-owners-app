@@ -472,6 +472,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
   }, 0);
 
   const { afterActionBanner } = useAfterActionCandidate(events);
+  const [selectedActivity, setSelectedActivity] = useState(null);
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
@@ -620,7 +621,13 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               {activity.map((a, i) => {
                 const ev = events.find((e) => e.id === a.eventId);
                 return (
-                  <div key={i} className="p-3 flex items-center gap-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setSelectedActivity(a)}
+                    className="w-full text-left p-3 flex items-center gap-2 transition-transform duration-100 active:scale-[0.98]"
+                    style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+                  >
                     <FileSignature size={14} color={T.good} />
                     <div className="flex-1 min-w-0 text-[12px]" style={{ ...body, color: T.ashDim }}>
                       <span style={{ fontWeight: 600, color: T.ash }}>{a.signedName}</span> signed the waiver for {ev?.title || "an event"}
@@ -628,7 +635,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
                     {a.signedAt && (
                       <div className="text-[10px] flex-shrink-0" style={{ ...mono, color: T.ashFaint }}>{timeAgo(a.signedAt)}</div>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -668,6 +675,14 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
           ))
         )}
       </div>
+
+      {selectedActivity && (
+        <SignedWaiverModal
+          activity={selectedActivity}
+          event={events.find((e) => e.id === selectedActivity.eventId)}
+          onClose={() => setSelectedActivity(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2629,12 +2644,17 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   const [grantError, setGrantError] = useState("");
 
   // Display-only preview — the real amount is computed server-side in
-  // grantVoucherToPlayer using the exact same math, so this will always
-  // match what actually gets issued.
+  // grantVoucherToPlayer (resolveVoucherAmountCents, functions/index.js)
+  // using the exact same math, so this will always match what actually
+  // gets issued. Prefers the booking's own stored entryPriceCents (every
+  // booking made since that field shipped) over reconstructing it from
+  // amountPaidCents, the same fallback order the server uses.
   const previewGrantAmountCents = confirmGrant
-    ? (profile?.feeModel === "absorb"
-        ? confirmGrant.booking.amountPaidCents
-        : Math.max(0, confirmGrant.booking.amountPaidCents - (confirmGrant.booking.bookingFeeCents || 0)))
+    ? (typeof confirmGrant.booking.entryPriceCents === "number"
+        ? confirmGrant.booking.entryPriceCents
+        : Math.max(0, confirmGrant.booking.amountPaidCents
+            - (confirmGrant.booking.selectedRentals || []).reduce((s, r) => s + (typeof r.priceCents === "number" ? r.priceCents : 0), 0)
+            - (profile?.feeModel !== "absorb" ? (confirmGrant.booking.bookingFeeCents || 0) : 0)))
     : 0;
 
   const handleConfirmGrant = async () => {
@@ -2953,6 +2973,53 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
 // within this event's own real bookings, not all of Atlas — checking
 // someone in only ever makes sense for someone who already has a real
 // booking here, the same constraint the scanner itself enforces.
+function SignedWaiverModal({ activity, event, onClose }) {
+  const signedAtStr = activity.signedAt?.toDate ? activity.signedAt.toDate().toLocaleString() : "";
+  const versionMismatch = event?.waiver?.version && activity.waiverVersion && event.waiver.version !== activity.waiverVersion;
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 flex items-end" style={{ background: "rgba(0,0,0,0.5)", zIndex: 1600 }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-h-[85vh] flex flex-col" style={{ background: T.void, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
+        <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${T.line}` }}>
+          <div>
+            <h2 className="text-[16px] font-semibold" style={{ ...display, color: T.ash }}>Signed Waiver</h2>
+            <p className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{event?.title || "an event"}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center transition-transform duration-100 active:scale-90">
+            <X size={18} color={T.ashDim} />
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+          <div className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{activity.signedName}</div>
+            {signedAtStr && <div className="text-[11px] mt-0.5" style={{ ...mono, color: T.ashFaint }}>{signedAtStr}</div>}
+          </div>
+
+          {versionMismatch && (
+            <div className="mb-3 p-3" style={{ background: "rgba(21,84,184,0.08)", border: `1px solid ${T.accent}`, borderRadius: 6 }}>
+              <div className="text-[12px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Edited since this was signed</div>
+              <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>
+                The waiver text below is the current version — it may not exactly match what {activity.signedName} agreed to at the time.
+              </div>
+            </div>
+          )}
+
+          {!event ? (
+            <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>This event no longer exists.</p>
+          ) : event.waiver?.text ? (
+            <div className="p-3 text-[12px] whitespace-pre-wrap" style={{ ...body, background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, color: T.ashDim }}>
+              {event.waiver.text}
+            </div>
+          ) : (
+            <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>No waiver text is on file for this event.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ManualCheckInModal({ event, bookings, signatures, onClose }) {
   const [query, setQuery] = useState("");
   const [busyUid, setBusyUid] = useState(null);
