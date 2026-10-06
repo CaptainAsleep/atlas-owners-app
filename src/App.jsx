@@ -4911,11 +4911,28 @@ export default function App() {
   // and sessionStorage carries it across the round-trip to Stripe and
   // back, where the corruption actually happens.
   useEffect(() => {
+    // 2026-10-06 (same fix as the player app, which hit it on desktop Opera
+    // GX): the never-shrink cache is only right for the phone/tablet WebKit
+    // bug. On desktop the viewport legitimately shrinks (resize, zoom,
+    // leaving fullscreen, devtools or a browser sidebar), and html/body/#root
+    // are position:fixed + overflow:hidden at this height, so a stale larger
+    // value pushes the bottom of the app below the visible window with no way
+    // to scroll to it. Desktop now always uses the live height.
+    const isPhoneOrTablet = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const setRealHeight = () => {
       const current = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      const cached = parseInt(sessionStorage.getItem("atlas-known-good-height") || "0", 10);
-      const real = Math.max(current, cached);
-      sessionStorage.setItem("atlas-known-good-height", String(real));
+      let real = current;
+      try {
+        if (isPhoneOrTablet) {
+          const cached = parseInt(sessionStorage.getItem("atlas-known-good-height") || "0", 10);
+          real = Math.max(current, cached);
+          sessionStorage.setItem("atlas-known-good-height", String(real));
+        } else {
+          sessionStorage.removeItem("atlas-known-good-height");
+        }
+      } catch {
+        // Storage blocked — fall back to the live height.
+      }
       document.documentElement.style.setProperty("--real-screen-height", `${real}px`);
     };
     setRealHeight();
