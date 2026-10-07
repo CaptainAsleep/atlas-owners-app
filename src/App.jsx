@@ -4719,6 +4719,36 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
   );
 }
 
+// iOS browsers other than Safari put their own token in the user agent
+// (Chrome = CriOS, Firefox = FxiOS, Edge = EdgiOS, Opera = OPiOS), and
+// their Share button lives in a different place than Safari's. In-app
+// browsers (Facebook, Instagram, etc.) can't add to Home Screen at all.
+// Returns the ordered install steps to show for the current browser.
+function getIOSInstallSteps(ua) {
+  if (/FBAN|FBAV|FB_IAB|Instagram|Snapchat|TikTok|musical_ly|Line\/|MicroMessenger|Twitter/i.test(ua)) {
+    return [
+      "This in-app browser can't install apps. Tap the \u2022\u2022\u2022 or Share icon and choose \"Open in Safari\"",
+      "Then tap Share in Safari and choose \"Add to Home Screen\"",
+    ];
+  }
+  if (/CriOS/i.test(ua)) {
+    return [
+      "Tap the Share icon at the top, on the right end of the address bar next to the URL",
+      "In the menu that opens, tap \"Add to Home Screen\". If you don't see it, tap \"View More\" to find it",
+    ];
+  }
+  if (/FxiOS|EdgiOS|OPiOS/i.test(ua)) {
+    return [
+      "Tap the Share icon (or open the browser's menu and choose Share)",
+      "Tap \"Add to Home Screen\" (tap \"View More\" if you don't see it). Not there? Open this page in Safari instead",
+    ];
+  }
+  return [
+    "Tap the Share button in Safari's toolbar",
+    "Scroll down and tap \"Add to Home Screen\"",
+  ];
+}
+
 function InstallGateScreen({ platform, deferredPrompt }) {
   const [installing, setInstalling] = useState(false);
 
@@ -4743,14 +4773,12 @@ function InstallGateScreen({ platform, deferredPrompt }) {
 
       {platform === "ios" ? (
         <div className="w-full text-left" style={{ maxWidth: 320 }}>
-          <div className="flex items-center gap-3 mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
-            <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>1</span>
-            <span className="text-[13px]" style={{ ...body, color: T.ash }}>Tap the Share button in Safari's toolbar</span>
-          </div>
-          <div className="flex items-center gap-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
-            <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>2</span>
-            <span className="text-[13px]" style={{ ...body, color: T.ash }}>Scroll down and tap "Add to Home Screen"</span>
-          </div>
+          {getIOSInstallSteps(navigator.userAgent).map((step, i, arr) => (
+            <div key={i} className={"flex items-center gap-3 p-3" + (i < arr.length - 1 ? " mb-3" : "")} style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+              <span className="text-[16px] font-semibold" style={{ ...display, color: T.accent }}>{i + 1}</span>
+              <span className="text-[13px]" style={{ ...body, color: T.ash }}>{step}</span>
+            </div>
+          ))}
         </div>
       ) : deferredPrompt ? (
         <button
