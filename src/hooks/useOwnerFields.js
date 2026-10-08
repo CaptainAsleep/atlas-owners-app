@@ -131,6 +131,13 @@ export function useFieldActions() {
       await batch.commit();
       return "claimed";
     }
+    if (field.emailClaimEnabled) {
+      // Michael already knows this field's owner email (e.g. a Gmail that
+      // can't match ownerEmailDomain). The server decides whether THIS
+      // account's email is the invited one and, if so, emails a one-time
+      // code — the UI falls back to website verification if it isn't.
+      return "verify-email";
+    }
     if (field.website) {
       return "verify-website";
     }
@@ -182,6 +189,23 @@ export function useFieldActions() {
     return res.data;
   }
 
+  // Email-code claim, for fields flagged emailClaimEnabled. Step 1 asks the
+  // server to email a 6-digit code to the invited address — returns
+  // { eligible: false } (nothing sent) if this account's email isn't it.
+  async function requestEmailClaim(fieldId) {
+    const request = httpsCallable(functions, "requestFieldEmailClaim");
+    const res = await request({ fieldId });
+    return res.data;
+  }
+
+  // Step 2: submit the code. Only { verified: true } means the field was
+  // actually claimed (the Cloud Function does that write itself).
+  async function verifyEmailClaim(fieldId, code) {
+    const verify = httpsCallable(functions, "verifyFieldEmailClaim");
+    const res = await verify({ fieldId, code });
+    return res.data;
+  }
+
   // Accepts any subset of the same fields the player app already knows how
   // to display — about, hours, amenities (array), rules (array), chrono
   // ({aeg, sniper, dmr}), rentals (array of {name, price, includes,
@@ -202,7 +226,7 @@ export function useFieldActions() {
     }
   }
 
-  return { claimField, requestClaimCode, verifyWebsiteClaim, updateFieldProfile };
+  return { claimField, requestClaimCode, verifyWebsiteClaim, requestEmailClaim, verifyEmailClaim, updateFieldProfile };
 }
 
 // Banned players for a specific field — private to that field's owner.

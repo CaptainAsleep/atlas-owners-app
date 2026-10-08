@@ -700,7 +700,7 @@ function normalizeFieldName(name) {
 }
 
 /* ---------- Claim a field ---------- */
-function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, requestClaimCode, verifyWebsiteClaim, onClaimed }) {
+function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerEmail, claimField, requestClaimCode, verifyWebsiteClaim, requestEmailClaim, verifyEmailClaim, onClaimed }) {
   const [search, setSearch] = useState("");
   const [claimingId, setClaimingId] = useState(null);
   const [error, setError] = useState("");
@@ -715,6 +715,15 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   const [verifyWebsiteUrl, setVerifyWebsiteUrl] = useState("");
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState("");
+
+  // Email-code sub-flow — for fields flagged emailClaimEnabled: the server
+  // emails a 6-digit code to the invited address, and entering it claims
+  // the field.
+  const [emailField, setEmailField] = useState(null);
+  const [emailSentTo, setEmailSentTo] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
 
   // Same exclusion the players app applies: a relocated, closed, or
   // airsoft-less field has nothing an owner could legitimately claim —
@@ -737,6 +746,71 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
       return f.name.toLowerCase().includes(q) || (f.city || "").toLowerCase().includes(q);
     });
 
+  const startWebsiteVerification = async (field) => {
+    setVerifyError("");
+    setVerifyCode("");
+    setVerifyWebsiteUrl(field.website || "");
+    setVerifyField(field);
+    try {
+      const codeRes = await requestClaimCode(field.id);
+      setVerifyCode(codeRes.code);
+      setVerifyWebsiteUrl(codeRes.website || field.website || "");
+    } catch (err) {
+      setVerifyError(err.message || "Couldn't start website verification — try again.");
+    }
+  };
+
+  // Returns true if a code was sent (modal opened), false if this account's
+  // email isn't the invited one. Real errors (rate limit, send failure)
+  // surface in the claim screen's normal error line via the throw.
+  const startEmailVerification = async (field) => {
+    const res = await requestEmailClaim(field.id);
+    if (!res?.eligible) return false;
+    setEmailError("");
+    setEmailCode("");
+    setEmailSentTo(res.sentTo || ownerEmail || "");
+    setEmailField(field);
+    return true;
+  };
+
+  const handleResendEmailCode = async () => {
+    if (!emailField) return;
+    setEmailLoading(true);
+    setEmailError("");
+    try {
+      const res = await requestEmailClaim(emailField.id);
+      if (res?.eligible) setEmailSentTo(res.sentTo || emailSentTo);
+    } catch (err) {
+      setEmailError(err.message || "Couldn't resend the code — try again.");
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (!emailField) return;
+    setEmailLoading(true);
+    setEmailError("");
+    try {
+      const res = await verifyEmailClaim(emailField.id, emailCode);
+      if (res.verified) {
+        const fieldId = emailField.id;
+        setEmailField(null);
+        onClaimed(fieldId);
+      } else if (res.reason === "expired") {
+        setEmailError("That code expired — tap Send a new code.");
+      } else if (res.reason === "too-many-attempts") {
+        setEmailError("Too many tries — tap Send a new code.");
+      } else {
+        setEmailError("That code doesn't match — check the email and try again.");
+      }
+    } catch (err) {
+      setEmailError(err.message || "Couldn't verify — try again.");
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
   const handleClaim = async (field) => {
     setClaimingId(field.id);
     setError("");
@@ -749,16 +823,17 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
       } else if (result === "pending") {
         setPendingMsg("This field's name matches another listing elsewhere, so we're holding your claim for a quick check before it's activated.");
       } else if (result === "verify-website") {
-        setVerifyError("");
-        setVerifyCode("");
-        setVerifyWebsiteUrl(field.website || "");
-        setVerifyField(field);
-        try {
-          const codeRes = await requestClaimCode(field.id);
-          setVerifyCode(codeRes.code);
-          setVerifyWebsiteUrl(codeRes.website || field.website || "");
-        } catch (err) {
-          setVerifyError(err.message || "Couldn't start website verification — try again.");
+        await startWebsiteVerification(field);
+      } else if (result === "verify-email") {
+        const started = await startEmailVerification(field);
+        if (!started) {
+          // This account's email isn't the invited one — fall back to the
+          // normal website route if the field has a site, else explain.
+          if (field.website) {
+            await startWebsiteVerification(field);
+          } else {
+            setError("This field was set up for a different email address. Sign in with the address it was sent to, or reach out and we'll sort it out.");
+          }
         }
       }
     } catch (err) {
@@ -830,7 +905,9 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
                   )}
                   {!isClaimed && !isPending && (
                     <div className="text-[10px] mt-0.5" style={{ ...body, color: T.ashFaint }}>
-                      {f.ownerEmailDomain
+                      {f.emailClaimEnabled
+                        ? `Claim with the email address you were invited with — we'll send a 6-digit code to confirm it's you${f.website ? " (or verify your site instead if that's not your address)" : ""}`
+                        : f.ownerEmailDomain
                         ? `Verified instantly with an @${f.ownerEmailDomain} email${f.website ? " — or verify your site instead if that's not your address" : ""}`
                         : f.website
                         ? "No matching email on file — verify instantly by proving you control the field's website"
@@ -859,6 +936,52 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
           })
         )}
       </div>
+
+      {emailField && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4 sm:pb-0" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div className="w-full sm:max-w-md p-6" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <h2 className="text-[16px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Claim {emailField.name}</h2>
+            <p className="text-[12px] mb-3" style={{ ...body, color: T.ashFaint }}>
+              We emailed a 6-digit code to {emailSentTo}. Enter it below to confirm it's you. It expires in 15 minutes.
+            </p>
+            <input
+              value={emailCode}
+              onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="000000"
+              className="w-full mb-3 px-3 py-2 text-center text-[20px] font-mono tracking-widest outline-none"
+              style={{ background: T.bg, borderRadius: 4, border: `1px solid ${T.line}`, color: T.ash }}
+            />
+            {emailError && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{emailError}</p>}
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => setEmailField(null)}
+                className="flex-1 px-3 py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-95"
+                style={{ ...display, background: "transparent", color: T.ashFaint, border: `1px solid ${T.line}`, borderRadius: T.rPill }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleVerifyEmail}
+                disabled={emailLoading || emailCode.length !== 6}
+                className="flex-1 px-3 py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-95"
+                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: emailLoading || emailCode.length !== 6 ? 0.6 : 1 }}
+              >
+                {emailLoading ? "Checking…" : "Verify & claim"}
+              </button>
+            </div>
+            <button
+              onClick={handleResendEmailCode}
+              disabled={emailLoading}
+              className="w-full text-[12px] py-1.5"
+              style={{ ...body, color: T.accent, background: "transparent" }}
+            >
+              Send a new code
+            </button>
+          </div>
+        </div>
+      )}
 
       {verifyField && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-4 sm:pb-0" style={{ background: "rgba(0,0,0,0.5)" }}>
@@ -5090,7 +5213,7 @@ export default function App() {
   const { fields: allFields, fieldsLoading: allFieldsLoading } = useAllFields();
   const { fields: myFields, fieldsLoading: myFieldsLoading } = useMyFields(user?.uid);
   const { fields: pendingFields, pendingLoading } = useMyPendingClaims(user?.uid);
-  const { claimField, requestClaimCode, verifyWebsiteClaim, updateFieldProfile } = useFieldActions();
+  const { claimField, requestClaimCode, verifyWebsiteClaim, requestEmailClaim, verifyEmailClaim, updateFieldProfile } = useFieldActions();
 
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard | events | analytics | roster | settings
   const [overlay, setOverlay] = useState(null); // null | claim | field | eventEdit | roster
@@ -5158,6 +5281,8 @@ export default function App() {
         claimField={claimField}
         requestClaimCode={requestClaimCode}
         verifyWebsiteClaim={verifyWebsiteClaim}
+        requestEmailClaim={requestEmailClaim}
+        verifyEmailClaim={verifyEmailClaim}
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("claimWelcome"); }}
       />
     );
