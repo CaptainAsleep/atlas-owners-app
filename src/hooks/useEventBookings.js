@@ -72,6 +72,43 @@ export function useEventInterestedCount(eventId) {
 // there's exactly one place that knows how a check-in actually gets
 // written (both mirrored copies — see the comment below) rather than two
 // copies of that logic that could quietly drift apart.
+// Private child snapshots for one booking (legal name, DOB, guardian name
+// and phone, waiver ref) — readable only by the field owner (and the
+// guardian) per firestore.rules. Empty for a solo booking, and on any
+// failure: a child's details being unreadable must never block check-in.
+export async function fetchAttendeeDetails(eventId, uid) {
+  try {
+    const snap = await getDocs(collection(db, "events", eventId, "bookings", uid, "attendeeDetails"));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error("fetchAttendeeDetails error:", err);
+    return [];
+  }
+}
+
+// uid -> [attendee details], loaded once per set of party bookings (solo
+// bookings have none, so they cost nothing).
+export function useAttendeeDetails(eventId, bookings) {
+  const [byUid, setByUid] = useState({});
+  const key = bookings.filter((b) => (b.attendeeCount || 1) > 1).map((b) => b.uid).sort().join(",");
+
+  useEffect(() => {
+    if (!eventId || !key) {
+      setByUid({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(key.split(",").map(async (uid) => [uid, await fetchAttendeeDetails(eventId, uid)])).then((entries) => {
+      if (!cancelled) setByUid(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, key]);
+
+  return byUid;
+}
+
 export async function checkInPlayer(eventId, uid) {
   const bookingRef = doc(db, "events", eventId, "bookings", uid);
   const snap = await getDoc(bookingRef);
@@ -80,7 +117,8 @@ export async function checkInPlayer(eventId, uid) {
   }
   const data = snap.data();
   if (data.checkedIn) {
-    return { ok: false, reason: "already-checked-in", callsign: data.callsign };
+    const attendees = (data.attendeeCount || 1) > 1 ? await fetchAttendeeDetails(eventId, uid) : [];
+    return { ok: false, reason: "already-checked-in", callsign: data.callsign, attendees };
   }
   // Both mirrored copies, not just the event's — a booking exists as two
   // documents (one under the event for the owner's roster, one under the
@@ -92,7 +130,10 @@ export async function checkInPlayer(eventId, uid) {
   batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp() });
   batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp() });
   await batch.commit();
-  return { ok: true, callsign: data.callsign };
+  // Check-in stays booking-level: one scan checks in the whole party. The
+  // attendee list is only for display (who just walked in).
+  const attendees = (data.attendeeCount || 1) > 1 ? await fetchAttendeeDetails(eventId, uid) : [];
+  return { ok: true, callsign: data.callsign, attendees };
 }
 
 // Parses the exact same "atlas:checkin:{eventId}:{uid}" payload the player

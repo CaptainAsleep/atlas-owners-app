@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./leg
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
-import { useEventBookings, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
+import { useEventBookings, useAttendeeDetails, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
@@ -1089,6 +1089,9 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
   const [name, setName] = useState(field.name || "");
+  // Whole years; blank = no minimum. Enforced for real server-side when a
+  // parent books a child (resolveAttendees in the players app's functions).
+  const [minimumAge, setMinimumAge] = useState(field.minimumAge ? String(field.minimumAge) : "");
   const [address, setAddress] = useState(field.address || "");
   // field.city is stored (and read by the player app) as a single combined
   // "City, ST" string — split it here just for a better editing experience.
@@ -1182,6 +1185,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
   // so the button correctly disables again until something new changes.
   const [snapshot, setSnapshot] = useState({
     imageUrl: field.imageUrl || null, name: field.name || "", address: field.address || "",
+    minimumAge: field.minimumAge ? String(field.minimumAge) : "",
     city: (field.city || "").split(",")[0]?.trim() || "", state: (field.city || "").split(",")[1]?.trim() || "",
     phone: field.phone || "", email: field.email || "", website: field.website || "",
     about: field.about || "", amenities: field.amenities || [],
@@ -1190,7 +1194,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
     shipRecipient: "", shipLine1: "", shipLine2: "", shipCity: "", shipState: "", shipZip: "", shipNotes: "",
   });
   const hasChanges =
-    imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address ||
+    imageUrl !== snapshot.imageUrl || name !== snapshot.name || address !== snapshot.address || minimumAge !== snapshot.minimumAge ||
     city !== snapshot.city || state !== snapshot.state ||
     phone !== snapshot.phone || email !== snapshot.email || website !== snapshot.website ||
     about !== snapshot.about ||
@@ -1308,8 +1312,11 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         .filter((r) => r.name.trim())
         .map((r) => ({ ...r, priceCents: Math.round((parsePrice(r.price) || 0) * 100) }));
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
+      const minAgeNum = parseInt(minimumAge, 10);
+      const cleanMinAge = Number.isInteger(minAgeNum) && minAgeNum > 0 && minAgeNum <= 99 ? minAgeNum : null;
       await updateFieldProfile(field.id, {
         name, address, city: combinedCity, phone, email, website, about, amenities, rules, chrono, rentals: cleanRentals, imageUrl,
+        minimumAge: cleanMinAge,
         // Explicitly cleared, not just omitted — hours are per-event now,
         // not per-field, so this actively wipes any stale value already
         // sitting on a field's document rather than leaving it dangling.
@@ -1328,7 +1335,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
         notes: shipNotes.trim(),
       });
       setSnapshot({
-        imageUrl, name, address, city, state, phone, email, website, about, amenities, rulesText, chronoLimits, rentals, savedWaivers,
+        imageUrl, name, address, minimumAge, city, state, phone, email, website, about, amenities, rulesText, chronoLimits, rentals, savedWaivers,
         shipRecipient, shipLine1, shipLine2, shipCity, shipState, shipZip, shipNotes,
       });
       setSaved(true);
@@ -1467,6 +1474,12 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
 
         <Eyebrow>Field Rules (one per line)</Eyebrow>
         <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
+
+        <Eyebrow>Minimum Age to Play</Eyebrow>
+        <TextField value={minimumAge} onChange={setMinimumAge} type="number" placeholder="Leave blank for no minimum" />
+        <p className="text-[11px] mb-4" style={{ ...body, color: T.ashFaint }}>
+          Parents can bring children who meet this age, counted on the event's start date. Blank means no minimum.
+        </p>
 
         <div className="mb-2 flex items-center justify-between">
           <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Chrono Limits</label>
@@ -2522,7 +2535,7 @@ function playFeedbackSound(success) {
 function CheckInScreen({ event, onBack }) {
   const containerRef = useRef(null);
   const scannerRef = useRef(null);
-  const [status, setStatus] = useState(null); // { ok, message }
+  const [status, setStatus] = useState(null); // { ok, message, lines? } — lines = the party's children, shown under the message
   const [flash, setFlash] = useState(null); // "good" | "alert" — brief full-screen color pulse over the still-live camera
   const busyRef = useRef(false); // guards against handling the same frame twice while a scan is being processed
 
@@ -2555,10 +2568,14 @@ function CheckInScreen({ event, onBack }) {
             if (busyRef.current) return;
             busyRef.current = true;
             const result = await checkInFromScan(decodedText, event.id);
+            const partyLines = (result.attendees || []).map((a) => ({
+              name: `${a.fullName} · ${a.callsign}`,
+              sub: a.waiverSignatureId ? `Guardian has signed waiver${a.guardianName ? ` — ${a.guardianName}` : ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}` : `Minor — guardian ${a.guardianName || ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}`,
+            }));
             if (result.ok) {
-              setStatus({ ok: true, message: `${result.callsign} checked in` });
+              setStatus({ ok: true, message: partyLines.length ? `${result.callsign} + ${partyLines.length} ${partyLines.length === 1 ? "child" : "children"} checked in` : `${result.callsign} checked in`, lines: partyLines });
             } else if (result.reason === "already-checked-in") {
-              setStatus({ ok: false, message: `${result.callsign} already checked in` });
+              setStatus({ ok: false, message: `${result.callsign} already checked in`, lines: partyLines });
             } else if (result.reason === "wrong-event") {
               setStatus({ ok: false, message: "That code is for a different event" });
             } else if (result.reason === "not-booked") {
@@ -2582,7 +2599,7 @@ function CheckInScreen({ event, onBack }) {
               setStatus(null);
               setFlash(null);
               busyRef.current = false;
-            }, 2200);
+            }, partyLines.length ? 5000 : 2200); // a party gets longer on screen so the gate can read each child's line
           },
           () => {} // fires continuously while no code is in frame — nothing to do here
         )
@@ -2618,8 +2635,14 @@ function CheckInScreen({ event, onBack }) {
 
       <div className="px-6 py-4" style={{ background: T.panel, borderTop: `1px solid ${T.line}` }}>
         {status ? (
-          <div className="py-3 text-center font-semibold text-[14px]" style={{ ...display, color: status.ok ? T.good : T.alert }}>
-            {status.message}
+          <div className="py-3 text-center">
+            <div className="font-semibold text-[14px]" style={{ ...display, color: status.ok ? T.good : T.alert }}>{status.message}</div>
+            {status.lines?.map((l, i) => (
+              <div key={i} className="mt-2">
+                <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{l.name}</div>
+                <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{l.sub}</div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="py-3 text-center text-[13px]" style={{ ...body, color: T.ashFaint }}>
@@ -2635,6 +2658,7 @@ function CheckInScreen({ event, onBack }) {
 function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id);
   const { bookings, bookingsLoading } = useEventBookings(event.id);
+  const attendeeDetails = useAttendeeDetails(event.id, bookings);
   const bannedUids = new Set(banned.map((b) => b.uid));
   const [showManualCheckIn, setShowManualCheckIn] = useState(false);
   const [rosterFilter, setRosterFilter] = useState("all"); // all | checkedIn | notYet
@@ -2652,7 +2676,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   // amountPaidCents, the same fallback order the server uses.
   const previewGrantAmountCents = confirmGrant
     ? (typeof confirmGrant.booking.entryPriceCents === "number"
-        ? confirmGrant.booking.entryPriceCents
+        ? confirmGrant.booking.entryPriceCents * Math.max(1, confirmGrant.booking.attendeeCount || 1)
         : Math.max(0, confirmGrant.booking.amountPaidCents
             - (confirmGrant.booking.selectedRentals || []).reduce((s, r) => s + (typeof r.priceCents === "number" ? r.priceCents : 0), 0)
             - (profile?.feeModel !== "absorb" ? (confirmGrant.booking.bookingFeeCents || 0) : 0)))
@@ -2703,6 +2727,11 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                 PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
               </span>
             )}
+            {(matchingBooking?.attendeeCount || 1) > 1 && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
+                PARTY OF {matchingBooking.attendeeCount}
+              </span>
+            )}
             {matchingBooking?.selectedChoiceLabel && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
                 {matchingBooking.selectedChoiceLabel}
@@ -2717,6 +2746,14 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           {secondaryName && (
             <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{secondaryName}</div>
           )}
+          {(attendeeDetails[uid] || []).map((a) => (
+            <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
+              <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
+              <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>
+                {a.waiverSignatureId ? "Guardian has signed waiver" : "Minor"}{a.guardianName ? ` — ${a.guardianName}` : ""}{a.guardianPhone ? ` · ${a.guardianPhone}` : ""}
+              </div>
+            </div>
+          ))}
           {dateValue?.toDate && (
             <div className="text-[11px]" style={{ ...mono, color: T.ashFaint }}>{dateValue.toDate().toLocaleDateString()}</div>
           )}
@@ -2781,7 +2818,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <div className="mb-2 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="flex items-baseline justify-between mb-1.5">
               <span className="text-[20px] font-semibold" style={{ ...display, color: T.good }}>{event.bookedCount || 0}</span>
-              <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} reserved</span>
+              <span className="text-[12px]" style={{ ...body, color: T.ashFaint }}>of {event.maxCapacity} reserved{(event.bookedCount || 0) > event.maxCapacity ? ` · ${event.bookedCount - event.maxCapacity} over` : ""}</span>
             </div>
             <div style={{ height: 6, background: T.panelAlt, borderRadius: 999, overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${Math.min(100, ((event.bookedCount || 0) / event.maxCapacity) * 100)}%`, background: T.good }} />
@@ -3071,7 +3108,8 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
       const result = await checkInPlayer(event.id, booking.uid);
       if (result.ok) {
         playFeedbackSound(true);
-        setFeedback({ uid: booking.uid, ok: true, message: `${result.callsign} checked in` });
+        const kids = (result.attendees || []).length;
+        setFeedback({ uid: booking.uid, ok: true, message: kids ? `${result.callsign} + ${kids} ${kids === 1 ? "child" : "children"} checked in` : `${result.callsign} checked in` });
       } else {
         playFeedbackSound(false);
         setFeedback({ uid: booking.uid, ok: false, message: result.reason === "already-checked-in" ? "Already checked in" : "Couldn't check in — try again" });
