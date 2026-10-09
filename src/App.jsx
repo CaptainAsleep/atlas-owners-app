@@ -4904,6 +4904,23 @@ function getIOSInstallSteps(ua) {
       "Tap \"Add to Home Screen\" (tap \"View More\" if you don't see it). Not there? Open this page in Safari instead",
     ];
   }
+  // Safari only from here. Since iOS 26 the OS version in the user agent is
+  // frozen (reports 18_6), but the Version/ token still tracks the Safari
+  // major, which matches the iOS major. Share moved in 26 and again in 27.
+  const vm = ua.match(/Version\/(\d+)/);
+  const major = vm ? parseInt(vm[1], 10) : 0;
+  if (major >= 27) {
+    return [
+      "Tap the menu icon (\u2630) on the left side of the address bar, then tap \"Share\" at the top of the menu",
+      "Tap \"View More\", then scroll down and tap \"Add to Home Screen\"",
+    ];
+  }
+  if (major === 26) {
+    return [
+      "Tap the \u2022\u2022\u2022 button on the right side of the address bar, then tap \"Share\"",
+      "Scroll down and tap \"Add to Home Screen\" (tap \"View More\" first if you don't see it)",
+    ];
+  }
   return [
     "Tap the Share button in Safari's toolbar",
     "Scroll down and tap \"Add to Home Screen\"",
