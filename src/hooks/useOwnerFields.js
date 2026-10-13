@@ -129,14 +129,27 @@ export function useFieldActions() {
         await auth.currentUser.reload();
       }
       if (!auth.currentUser?.emailVerified) {
+        // Atlas-branded verification email, sent server-side through Resend
+        // (sendOwnerClaimVerification in the players-app Cloud Functions).
+        // If that function is unreachable for any reason, fall back to
+        // Firebase's own default email so the owner is never left without
+        // a link. The server re-checks emailVerified live and may answer
+        // alreadyVerified (verified in another tab) — then claim right away.
+        let serverSaysVerified = false;
         try {
-          await sendEmailVerification(auth.currentUser);
+          const send = httpsCallable(functions, "sendOwnerClaimVerification");
+          const res = await send({ fieldId: field.id });
+          serverSaysVerified = res.data?.alreadyVerified === true;
         } catch (err) {
-          // Usually auth/too-many-requests from a quick re-tap — a link was
-          // already sent recently, which is fine; the UI says to check email.
-          console.warn("sendEmailVerification:", err?.code || err);
+          console.warn("sendOwnerClaimVerification failed, using Firebase's default email:", err?.code || err);
+          try {
+            await sendEmailVerification(auth.currentUser);
+          } catch (err2) {
+            // Usually auth/too-many-requests from a quick re-tap.
+            console.warn("sendEmailVerification:", err2?.code || err2);
+          }
         }
-        return "verify-own-email";
+        if (!serverSaysVerified) return "verify-own-email";
       }
       await auth.currentUser.getIdToken(true);
       // Batched, not two separate writes — the field claim and the
