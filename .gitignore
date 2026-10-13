@@ -3,3 +3,6 @@ dist
 .DS_Store
 .env
 .env.local
+
+# iCloud sync duplicates ("App 2.jsx", "index 2.css", …) — 2026-10-13
+* 2.*

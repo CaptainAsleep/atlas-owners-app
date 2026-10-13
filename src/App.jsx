@@ -822,6 +822,8 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
         onClaimed(field.id);
       } else if (result === "pending") {
         setPendingMsg("This field's name matches another listing elsewhere, so we're holding your claim for a quick check before it's activated.");
+      } else if (result === "verify-own-email") {
+        setPendingMsg(`We sent a verification link to ${ownerEmail}. Open it to confirm this address is yours, then tap Claim again.`);
       } else if (result === "verify-website") {
         await startWebsiteVerification(field);
       } else if (result === "verify-email") {

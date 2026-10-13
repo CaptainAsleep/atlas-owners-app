@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { collection, deleteDoc, doc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "../lib/firebase";
+import { auth, db, functions } from "../lib/firebase";
+import { sendEmailVerification } from "firebase/auth";
 
 // Every field, for the "claim a field" search/browse flow. Same public
 // data the player app already reads — no separate owner-facing copy of
@@ -106,7 +107,8 @@ export function useFieldActions() {
   //    for a possible later spot-check. A bad claim here can only affect
   //    listing content — Stripe's own KYC gates any real payout — so this
   //    is a low-risk default, not a security hole.
-  // Returns "claimed", "verify-website", or "claimed-unverified" so the UI
+  // Returns "claimed", "verify-own-email", "verify-website", or
+  // "claimed-unverified" so the UI
   // can show the right next step.
   async function claimField(field, ownerEmail, ownerId, hasNameCollision = false) {
     // No field-count cap anymore (Atlas Standard has no subscription
@@ -116,6 +118,27 @@ export function useFieldActions() {
 
     const emailDomain = (ownerEmail || "").split("@")[1];
     if (field.ownerEmailDomain && emailDomain === field.ownerEmailDomain) {
+      // A matching domain only counts once this account has proven it can
+      // read that inbox — firestore.rules requires the token's
+      // email_verified claim on this path (security fix 2026-10-13; before
+      // that, anyone could sign up as name@<field's domain> and claim it).
+      // reload() picks up a verification link clicked in another tab or
+      // device; getIdToken(true) makes sure the token the rules see carries
+      // the fresh claim rather than a cached pre-verification one.
+      if (auth.currentUser && !auth.currentUser.emailVerified) {
+        await auth.currentUser.reload();
+      }
+      if (!auth.currentUser?.emailVerified) {
+        try {
+          await sendEmailVerification(auth.currentUser);
+        } catch (err) {
+          // Usually auth/too-many-requests from a quick re-tap — a link was
+          // already sent recently, which is fine; the UI says to check email.
+          console.warn("sendEmailVerification:", err?.code || err);
+        }
+        return "verify-own-email";
+      }
+      await auth.currentUser.getIdToken(true);
       // Batched, not two separate writes — the field claim and the
       // owner's own claimedFieldCount both need to land together (there's
       // no Cloud Function on this path to do it server-side), and
