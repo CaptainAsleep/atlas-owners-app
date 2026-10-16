@@ -2508,11 +2508,61 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 /* ---------- Roster (real waiver signatures) ---------- */
 /* ---------- Check-in scanner ---------- */
 const LOADING_KEYFRAMES = `
-@keyframes loadingPulse {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
-  40% { transform: scale(1); opacity: 1; }
+@keyframes atlasLoaderLegs {
+  0% { stroke-dashoffset: 66; animation-timing-function: cubic-bezier(.55,0,1,1); }
+  36% { stroke-dashoffset: 0; }
+  74% { stroke-dashoffset: 0; animation-timing-function: cubic-bezier(.55,0,1,1); }
+  90%, 100% { stroke-dashoffset: -66; }
+}
+@keyframes atlasLoaderSwoop {
+  0%, 36% { stroke-dashoffset: 34; animation-timing-function: cubic-bezier(0,0,.45,1); }
+  55%, 90% { stroke-dashoffset: 0; animation-timing-function: cubic-bezier(0,0,.45,1); }
+  100% { stroke-dashoffset: -34; }
+}
+.atlasLoaderLegs { stroke-dasharray: 66 200; animation: atlasLoaderLegs 2.2s infinite; }
+.atlasLoaderSwoop { stroke-dasharray: 34 200; animation: atlasLoaderSwoop 2.2s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .atlasLoaderLegs, .atlasLoaderSwoop { animation: none; stroke-dashoffset: 0; }
 }
 `;
+
+// Loader mark: the Atlas "A" traced in stroke order -- up the right leg,
+// over the apex, down the left leg, then out along the swoop -- then erased
+// in the same direction, over a faint ghost of the full mark. A_MARK_D is
+// the white-fill letterform traced from public/logo.jpg (1024px space).
+// The swoop crosses the right leg, so it gets its own mask: the legs pass
+// blacks out a band around the swoop, and the swoop pass is confined to
+// that band, so the swoop never lights up early during the legs pass.
+// pathLength 66/34 are proportional to the real lengths of the two strokes
+// so the draw speed stays even across the hand-off.
+const A_MARK_D = "M783.3 782.6C813.5 782.4 813.9 782.4 814.0 778.1C814.0 776.0 801.6 750.0 796.9 742.3C794.7 738.7 791.1 731.9 789.0 727.3C786.8 722.6 782.8 714.9 780.1 710.1C777.3 705.4 773.5 697.2 771.5 692.0C769.5 686.8 765.9 679.3 763.5 675.4C761.1 671.5 757.8 665.4 756.2 661.9C754.6 658.4 751.0 651.7 748.2 647.1C745.4 642.6 741.5 634.6 739.5 629.6C737.5 624.5 732.8 615.0 729.0 608.5C725.2 601.9 720.2 592.3 717.9 587.0C704.2 555.7 697.8 550.5 683.4 559.2C679.6 561.5 670.9 565.9 664.0 569.0C657.1 572.1 647.7 577.0 643.1 579.9C638.5 582.8 629.7 587.6 623.6 590.5C607.3 598.3 606.1 600.6 611.8 613.6C613.4 617.4 616.3 624.1 618.1 628.5C619.9 632.9 623.5 640.2 626.2 644.6C628.8 649.1 634.2 659.7 638.1 668.1C642.1 676.6 647.5 687.3 650.1 692.0C652.7 696.7 656.5 705.0 658.4 710.5C660.4 715.9 663.5 722.9 665.3 726.0C667.2 729.0 672.4 739.1 676.9 748.5C694.7 785.4 693.0 784.4 736.5 783.3C746.4 783.0 767.5 782.7 783.3 782.6Z M227.5 781.8C279.4 781.7 278.9 781.7 283.6 775.4C285.2 773.2 290.4 767.5 295.2 762.7C300.1 757.9 305.8 751.5 308.0 748.5C310.2 745.6 314.6 741.1 317.9 738.6C321.2 736.1 327.2 730.1 331.2 725.3C335.2 720.5 342.0 713.9 346.3 710.6C350.5 707.2 358.8 700.7 364.6 696.0C379.0 684.5 390.0 676.7 405.4 666.8C412.6 662.3 421.6 656.0 425.5 652.9C429.4 649.8 437.3 644.9 443.2 642.0C449.0 639.2 456.8 634.4 460.4 631.4C464.0 628.4 470.9 624.0 475.7 621.7C483.7 617.8 498.8 609.6 524.0 595.5C529.2 592.5 544.1 585.1 557.0 579.0C569.9 572.8 581.0 567.4 581.7 566.8C583.7 565.2 607.1 553.9 613.4 551.6C616.8 550.3 626.9 545.6 636.0 541.0C645.0 536.5 656.3 531.3 661.0 529.5C665.7 527.7 674.5 523.8 680.5 520.7C686.6 517.7 694.6 514.1 698.5 512.7C702.4 511.3 707.7 509.2 710.3 508.1C713.0 507.0 718.7 505.1 723.2 504.0C736.5 500.7 752.6 491.4 750.6 488.2C748.8 485.3 723.4 489.0 712.5 493.8C708.6 495.5 702.6 497.4 699.0 498.0C695.4 498.6 688.4 500.5 683.5 502.1C678.5 503.7 669.7 505.9 664.0 507.0C658.3 508.2 649.7 510.7 644.8 512.6C640.0 514.5 635.5 516.0 634.9 516.0C633.1 516.0 579.0 534.1 546.5 545.5C537.7 548.6 526.0 552.6 520.5 554.4C505.3 559.4 489.2 566.6 451.0 585.3C436.4 592.4 421.7 599.2 418.3 600.5C414.9 601.7 407.8 605.5 402.6 608.9C373.7 627.6 357.1 620.5 373.6 596.5C379.1 588.4 382.3 582.1 386.6 570.7C388.5 565.7 397.0 547.6 405.4 530.5C413.9 513.5 424.4 491.2 428.9 481.0C433.4 470.8 439.6 457.4 442.7 451.2C445.7 444.9 451.1 433.9 454.6 426.7C458.1 419.4 462.8 410.4 465.0 406.5C467.2 402.6 470.2 396.4 471.6 392.5C473.1 388.6 476.5 380.5 479.1 374.3C481.8 368.2 484.0 362.5 484.0 361.8C484.0 347.2 499.4 350.6 504.6 366.3C506.0 370.8 509.2 377.7 511.6 381.6C514.0 385.4 516.3 389.8 516.9 391.2C519.5 398.2 544.6 452.4 555.5 474.5C566.5 497.0 569.0 498.4 587.0 491.9C601.5 486.7 617.0 482.1 628.5 479.4C656.8 472.8 660.8 467.8 651.4 451.5C642.4 435.9 640.1 431.4 637.5 424.6C636.1 420.7 631.8 412.4 628.0 406.1C624.2 399.7 618.1 388.0 614.4 380.0C610.7 372.0 605.8 362.6 603.5 359.0C598.2 350.8 597.2 349.0 595.0 342.6C594.1 339.8 591.5 334.6 589.3 331.0C587.1 327.4 583.6 320.4 581.4 315.5C579.2 310.5 575.5 303.7 573.1 300.2C570.8 296.7 566.7 289.1 564.1 283.2C561.5 277.3 556.9 268.8 553.9 264.3C550.9 259.8 547.3 253.9 545.8 251.1C539.8 240.1 528.3 238.2 472.5 239.5C432.7 240.4 431.2 240.8 425.3 252.5C423.9 255.2 419.8 262.4 416.2 268.3C412.7 274.2 407.6 284.1 405.0 290.3C402.4 296.5 396.3 308.9 391.5 318.0C386.8 327.1 381.5 337.6 379.9 341.5C378.2 345.4 375.2 351.4 373.1 355.0C371.0 358.6 366.9 366.7 364.1 373.0C361.3 379.3 355.6 390.7 351.5 398.2C347.4 405.8 344.0 412.2 344.0 412.5C344.0 414.3 334.2 435.3 330.4 441.5C327.9 445.7 323.6 454.1 321.0 460.1C318.3 466.1 314.3 474.5 311.9 478.7C306.7 488.2 305.2 491.3 295.6 511.0C291.4 519.5 286.1 530.1 283.7 534.5C281.4 538.9 277.5 547.0 275.1 552.5C272.6 558.0 268.0 567.1 264.8 572.7C261.6 578.2 257.8 586.2 256.4 590.3C255.0 594.4 252.3 600.4 250.3 603.7C248.3 606.9 244.5 614.4 241.9 620.4C239.2 626.4 235.3 634.0 233.1 637.4C230.9 640.7 227.7 647.1 226.0 651.5C221.9 662.1 209.0 688.7 190.6 724.5C185.5 734.4 177.9 749.2 173.7 757.4C163.1 777.9 164.3 784.7 178.0 782.4C179.4 782.1 201.7 781.9 227.5 781.8Z";
+const A_LEGS_D = "M753 800 L514 250 L468 250 L216 800";
+const A_SWOOP_D = "M240 800 C370 640 560 540 806 474";
+
+function AtlasALoader({ color, size = 56 }) {
+  const m = { maskUnits: "userSpaceOnUse", x: 0, y: 0, width: 1024, height: 1024 };
+  return (
+    <svg width={size} height={size} viewBox="140 215 700 600" role="img" aria-label="Loading">
+      <defs>
+        <mask id="atlasLoaderLegsMask" {...m}>
+          <path d={A_LEGS_D} pathLength="66" className="atlasLoaderLegs" fill="none" stroke="#fff" strokeWidth="178" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={A_SWOOP_D} fill="none" stroke="#000" strokeWidth="86" strokeLinecap="round" />
+        </mask>
+        <mask id="atlasLoaderSwoopZone" {...m}>
+          <path d={A_SWOOP_D} fill="none" stroke="#fff" strokeWidth="96" strokeLinecap="round" />
+        </mask>
+        <mask id="atlasLoaderSwoopMask" {...m}>
+          <path d={A_SWOOP_D} pathLength="34" className="atlasLoaderSwoop" fill="none" stroke="#fff" strokeWidth="120" strokeLinecap="round" />
+        </mask>
+      </defs>
+      <path d={A_MARK_D} fill={color} fillRule="evenodd" opacity="0.14" />
+      <g fill={color}>
+        <g mask="url(#atlasLoaderLegsMask)"><path d={A_MARK_D} fillRule="evenodd" /></g>
+        <g mask="url(#atlasLoaderSwoopZone)"><g mask="url(#atlasLoaderSwoopMask)"><path d={A_MARK_D} fillRule="evenodd" /></g></g>
+      </g>
+    </svg>
+  );
+}
 
 // Ported from atlas-players-app's identical LoadingScreen after a real
 // 2026-09-20 report there: a player got stuck on this screen forever with
@@ -2533,21 +2583,7 @@ function LoadingScreen() {
     <div className="h-screen flex flex-col items-center justify-center gap-5 px-8" style={flatBg}>
       <style>{FONTS}</style>
       <style>{LOADING_KEYFRAMES}</style>
-      <div className="flex gap-2">
-        {[0, 0.15, 0.3].map((delay) => (
-          <div
-            key={delay}
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: 999,
-              background: T.accent,
-              animation: "loadingPulse 1.4s ease-in-out infinite",
-              animationDelay: `${delay}s`,
-            }}
-          />
-        ))}
-      </div>
+      <AtlasALoader color={T.accent} />
       {showRetry && (
         <div className="flex flex-col items-center gap-3 text-center">
           <p className="text-[13px] leading-relaxed" style={{ ...body, color: T.ashDim }}>
