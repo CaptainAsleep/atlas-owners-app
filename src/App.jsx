@@ -1726,6 +1726,45 @@ const GAME_TYPES = [
 // summary with real stats, not straight into the edit form. Mirrors
 // FieldOverviewScreen's exact pattern: view first, edit is one tap away
 // via the pencil icon.
+// Per-group head count for an organizer event's Team / Role / Options
+// groups: "Green 42/50, Red 38/50". Counts every head in a party (a booking
+// of 3 adds 3), the same way the server's hard cap does. A choice past its
+// cap (a paid-checkout race can overshoot by a head or two) shows in red.
+// Renders nothing for an event with no selection groups.
+function SelectionTally({ event, bookings }) {
+  const groups = (Array.isArray(event?.selectionGroups) ? event.selectionGroups : []).filter((g) => g?.id && Array.isArray(g.choices));
+  if (groups.length === 0) return null;
+  const taken = {};
+  (bookings || []).forEach((b) => {
+    const heads = Math.max(1, Number(b.attendeeCount) || 1);
+    (Array.isArray(b.selections) ? b.selections : []).forEach((x) => {
+      const k = `${x.groupId}:${x.choiceId}`;
+      taken[k] = (taken[k] || 0) + heads;
+    });
+  });
+  return (
+    <div className="mb-4">
+      {groups.map((g) => (
+        <div key={g.id} className="p-3 mb-2" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+          <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>{g.label}</div>
+          <div className="flex flex-col gap-1.5">
+            {g.choices.map((c) => {
+              const n = taken[`${g.id}:${c.id}`] || 0;
+              const over = typeof c.capacity === "number" && n > c.capacity;
+              return (
+                <div key={c.id} className="flex items-center justify-between text-[12px]" style={{ ...body, color: T.ashDim }}>
+                  <span>{c.label}</span>
+                  <span style={{ ...mono, color: over ? T.alert : T.accent, fontWeight: 600 }}>{n}{typeof c.capacity === "number" ? ` / ${c.capacity}` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) {
   const today = new Date().toISOString().slice(0, 10);
   const isPast = !ev.draft && !!(ev.endDate || ev.date) && (ev.endDate || ev.date) < today;
@@ -1965,7 +2004,11 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
               </div>
             )}
 
-            {Object.keys(aarStats.choiceCounts).length > 0 && (
+ {Array.isArray(ev.selectionGroups) && ev.selectionGroups.length > 0 && (
+              <SelectionTally event={ev} bookings={aarBookings} />
+            )}
+
+            {!(Array.isArray(ev.selectionGroups) && ev.selectionGroups.length > 0) && Object.keys(aarStats.choiceCounts).length > 0 && (
               <div className="p-3 mb-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[10px] font-semibold uppercase mb-2" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Price Options Chosen</div>
                 <div className="flex flex-col gap-1.5">
@@ -2082,6 +2125,52 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
   const [priceOptionsChoices, setPriceOptionsChoices] = useState(
     (existing?.priceOptions?.choices || []).map((c) => ({ id: c.id, label: c.label, price: c.priceCents != null ? String(c.priceCents / 100) : "" }))
   );
+  // Add-ons (organizer events only) — optional extras a player can tick at
+  // booking, e.g. a "10 grenades" pack for $190. Stored on the event as
+  // `rentals`, the same shape as a field's rental catalog, so the booking
+  // and refund math treat them identically. On/off only, no quantity: a
+  // bundle is its own item. Price is kept as a raw string here and only
+  // converted to cents at save time.
+  const toAddonRows = (list) => (list || []).map((r) => ({
+    id: r.id, name: r.name || "", price: r.priceCents != null ? String(r.priceCents / 100) : "",
+    includes: r.includes || "", availability: r.availability || "",
+  }));
+  const [addons, setAddons] = useState(toAddonRows(existing?.rentals));
+  const addAddon = () => setAddons([...addons, { id: `rental_${Date.now()}_${addons.length}`, name: "", price: "", includes: "", availability: "" }]);
+  const updateAddon = (i, key, value) => {
+    const next = [...addons];
+    next[i] = { ...next[i], [key]: value };
+    setAddons(next);
+  };
+  const removeAddon = (i) => setAddons(addons.filter((_, idx) => idx !== i));
+
+  // Team / Role / Options groups (organizer events only). Each group is one
+  // question asked at booking ("Which team?", "Which role?"), one answer per
+  // booking for the whole party; each choice may carry an extra price and a
+  // hard seat cap (counts every head). Prices/caps are raw strings here and
+  // only converted at save time.
+  const toGroupRows = (list) => (list || []).map((g) => ({
+    id: g.id, label: g.label || "", required: g.required !== false,
+    choices: (g.choices || []).map((c) => ({
+      id: c.id, label: c.label || "",
+      price: c.priceCents ? String(c.priceCents / 100) : "",
+      capacity: typeof c.capacity === "number" ? String(c.capacity) : "",
+    })),
+  }));
+  const [groups, setGroups] = useState(toGroupRows(existing?.selectionGroups));
+  // Once an event has bookings, existing groups/choices can't be removed:
+  // capacity counts are keyed on their ids. Renaming, repricing and
+  // changing a cap stay allowed; new groups/choices can always be added.
+  const lockedIds = new Set();
+  if ((existing?.bookedCount || 0) > 0) {
+    (existing?.selectionGroups || []).forEach((g) => { lockedIds.add(g.id); (g.choices || []).forEach((c) => lockedIds.add(c.id)); });
+  }
+  const addGroup = () => setGroups([...groups, { id: `group_${Date.now()}_${groups.length}`, label: "", required: true, choices: [] }]);
+  const updateGroup = (gi, patch) => setGroups(groups.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
+  const removeGroup = (gi) => setGroups(groups.filter((_, i) => i !== gi));
+  const addGroupChoice = (gi) => updateGroup(gi, { choices: [...groups[gi].choices, { id: `choice_${Date.now()}_${groups[gi].choices.length}`, label: "", price: "", capacity: "" }] });
+  const updateGroupChoice = (gi, ci, key, value) => updateGroup(gi, { choices: groups[gi].choices.map((c, i) => (i === ci ? { ...c, [key]: value } : c)) });
+  const removeGroupChoice = (gi, ci) => updateGroup(gi, { choices: groups[gi].choices.filter((_, i) => i !== ci) });
   const patchInputRef = React.useRef(null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
@@ -2104,7 +2193,9 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
       venueCity !== (existing?.venueCity || "") || venueState !== (existing?.venueState || "") ||
       minimumAge !== (existing?.minimumAge != null ? String(existing.minimumAge) : "") ||
       venueLat !== (typeof existing?.lat === "number" ? existing.lat : null) ||
-      venueLng !== (typeof existing?.lng === "number" ? existing.lng : null)
+      venueLng !== (typeof existing?.lng === "number" ? existing.lng : null) ||
+      JSON.stringify(addons) !== JSON.stringify(toAddonRows(existing?.rentals)) ||
+      JSON.stringify(groups) !== JSON.stringify(toGroupRows(existing?.selectionGroups))
     )) ||
     waiverText !== (existing?.waiver?.text || "") ||
     patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
@@ -2241,6 +2332,36 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
       minimumAge: minimumAge.trim() && Number.isFinite(parseInt(minimumAge, 10)) ? parseInt(minimumAge, 10) : null,
       lat: venueLat,
       lng: venueLng,
+      // Only items with a name and a real price are kept — a half-filled
+      // row is dropped rather than saved broken (a $0 add-on can't be
+      // selected at booking anyway).
+      // Team/Role/Options groups. A group needs a label and at least one
+      // labelled choice to be kept; a half-filled row is dropped rather
+      // than saved broken. capacity is a hard seat cap (null = unlimited).
+      selectionGroups: groups
+        .map((g) => ({
+          id: g.id, label: g.label.trim(), required: g.required,
+          choices: g.choices.filter((c) => c.label.trim()).map((c) => {
+            const cap = parseInt(c.capacity, 10);
+            return {
+              id: c.id, label: c.label.trim(),
+              priceCents: Math.round((parsePrice(c.price) || 0) * 100),
+              capacity: Number.isFinite(cap) && cap > 0 ? cap : null,
+            };
+          }),
+        }))
+        .filter((g) => g.label && g.choices.length > 0),
+      rentals: addons
+        .filter((r) => r.name.trim() && (parsePrice(r.price) || 0) > 0)
+        .map((r) => {
+          const priceCents = Math.round((parsePrice(r.price) || 0) * 100);
+          // `price` is the display text the player app shows next to the
+          // item (same as a field rental's); priceCents is what's charged.
+          return {
+            id: r.id, name: r.name.trim(), price: `$${priceCents % 100 === 0 ? priceCents / 100 : (priceCents / 100).toFixed(2)}`, priceCents,
+            includes: r.includes.trim(), availability: r.availability.trim(),
+          };
+        }),
     } : {}),
     date,
     endDate: endDate || null,
@@ -2298,9 +2419,11 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
     // A paid event can't take payment until payouts are set up (the booking
     // function refuses to start checkout for a host with no connected
     // account), so publishing one would put a broken Reserve button in front
-    // of players. Drafts are still fine. (Field events keep their existing
-    // behavior; this gate is organizer events only.)
-    if (venueMode && !draft && !isFreeEvent && parsePrice(price) !== null && !payoutsEnabled) {
+    // of players. Drafts are still fine. Paid add-ons count too: a free
+    // ticket with a priced add-on still goes through checkout. (Field
+    // events keep their existing behavior; this gate is organizer events
+    // only.)
+    if (venueMode && !draft && !payoutsEnabled && ((!isFreeEvent && parsePrice(price) !== null) || addons.some((r) => r.name.trim() && (parsePrice(r.price) || 0) > 0) || groups.some((g) => g.choices.some((c) => c.label.trim() && (parsePrice(c.price) || 0) > 0)))) {
       setError("Set up payouts first (Dashboard → Set up payouts) — players can't pay for a paid event until that's done. You can still save it as a draft.");
       return;
     }
@@ -2554,6 +2677,86 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
             One flat price per ticket. Atlas's fee (3.5% + $1.30 per ticket, no cap) comes out of your payout — players pay exactly the price you set.
             {!payoutsEnabled && <span style={{ color: T.alert }}> Payouts aren't set up yet, so you can save a paid event as a draft but not publish it.</span>}
           </p>
+        )}
+
+        {venueMode && (
+        <>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Team / Role / Options</label>
+          <button onClick={addGroup} className="text-[12px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, color: T.accent }}>+ Add Group</button>
+        </div>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Questions players answer when they book — which team, which role, attendee type. Each group is one question; players pick one answer, and it applies to everyone in their party. Give a choice a seat cap to stop bookings once it's full (every person in a party counts). An extra price is optional and is added on top of the ticket price.
+        </p>
+        {groups.map((g, gi) => {
+          const groupLocked = lockedIds.has(g.id);
+          return (
+            <div key={g.id} className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+              <div className="flex gap-2 mb-2">
+                <input value={g.label} onChange={(e) => updateGroup(gi, { label: e.target.value })} placeholder="Question, e.g. Team, Role"
+                  className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+                {!groupLocked && (
+                  <button onClick={() => removeGroup(gi)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center transition-transform duration-100 active:scale-90" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
+                    <Trash2 size={14} color={T.alert} />
+                  </button>
+                )}
+              </div>
+              <label className="flex items-center gap-2 mb-2 text-[12px]" style={{ ...body, color: T.ashDim }}>
+                <input type="checkbox" checked={g.required} onChange={(e) => updateGroup(gi, { required: e.target.checked })} />
+                Players must choose one to book
+              </label>
+              {g.choices.map((c, ci) => (
+                <div key={c.id} className="flex gap-2 mb-2">
+                  <input value={c.label} onChange={(e) => updateGroupChoice(gi, ci, "label", e.target.value)} placeholder="Choice, e.g. Green Team"
+                    className="flex-1 min-w-0 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+                  <input value={c.price} onChange={(e) => updateGroupChoice(gi, ci, "price", e.target.value)} placeholder="+$0"
+                    className="w-16 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+                  <input value={c.capacity} onChange={(e) => updateGroupChoice(gi, ci, "capacity", e.target.value.replace(/[^0-9]/g, ""))} placeholder="Cap" inputMode="numeric"
+                    className="w-16 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+                  {!lockedIds.has(c.id) && (
+                    <button onClick={() => removeGroupChoice(gi, ci)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center transition-transform duration-100 active:scale-90" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
+                      <Trash2 size={14} color={T.alert} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button onClick={() => addGroupChoice(gi)} className="text-[12px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, color: T.accent }}>+ Add Choice</button>
+              {groupLocked && (
+                <p className="text-[11px] mt-2" style={{ ...body, color: T.ashFaint }}>Players have already booked, so existing choices can be renamed or re-capped but not removed.</p>
+              )}
+            </div>
+          );
+        })}
+        </>
+        )}
+
+        {venueMode && (
+        <>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Add-ons</label>
+          <button onClick={addAddon} className="text-[12px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, color: T.accent }}>+ Add Add-on</button>
+        </div>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Optional extras players can tick when they book — a rental, a gear pack, a meal. Each is a single item at one price (a "10 grenade pack" is one add-on, not a quantity). Atlas's fee applies to the whole total and comes out of your payout.
+        </p>
+        {addons.map((r, i) => (
+          <div key={r.id} className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="flex gap-2 mb-2">
+              <input value={r.name} onChange={(e) => updateAddon(i, "name", e.target.value)} placeholder="Add-on name"
+                className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <input value={r.price} onChange={(e) => updateAddon(i, "price", e.target.value)} placeholder="$30"
+                className="w-20 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              <button onClick={() => removeAddon(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center transition-transform duration-100 active:scale-90" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
+                <Trash2 size={14} color={T.alert} />
+              </button>
+            </div>
+            <input value={r.includes} onChange={(e) => updateAddon(i, "includes", e.target.value)} placeholder="What's included"
+              className="w-full mb-2 px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+            <input value={r.availability} onChange={(e) => updateAddon(i, "availability", e.target.value)} placeholder="Availability note"
+              className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+          </div>
+        ))}
+        </>
         )}
 
         {!venueMode && (
@@ -3283,16 +3486,19 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           </p>
         )}
 
+        {!bookingsLoading && <SelectionTally event={event} bookings={bookings} />}
+
         <div className="flex items-center justify-between mb-1">
           <Eyebrow>Reserved Players ({bookings.length})</Eyebrow>
           {bookings.length > 0 && (
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Reserved Players.csv`,
-                ["Callsign", "Selected Option", "Rentals", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Refund Status", "Stripe Checkout Session ID"],
+                ["Callsign", "Selected Option", ...(event.selectionGroups || []).map((g) => g.label), "Rentals", "Reserved At", "Checked In", "Checked In At", "Paid", "Amount Paid", "Refund Status", "Stripe Checkout Session ID"],
                 bookings.map((b) => [
                   b.callsign,
                   b.selectedChoiceLabel || "",
+                  ...(event.selectionGroups || []).map((g) => (b.selections || []).find((x) => x.groupId === g.id)?.choiceLabel || ""),
                   (b.selectedRentals || []).map((r) => r.name).join(", "),
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
                   b.checkedIn ? "Yes" : "No",
