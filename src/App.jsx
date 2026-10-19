@@ -2047,13 +2047,17 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
 // typed in (or copied from an Atlas field) and lives on the event itself.
 // The mode is fixed for an event's life — isMajor/fieldId/hostOwnerId are
 // immutable in the Firestore rules.
-function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, existing, onBack, createEvent, createMajorEvent, updateEvent, newEventId, allFields }) {
+function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName = "", payoutsEnabled, existing, onBack, createEvent, createMajorEvent, updateEvent, newEventId, allFields }) {
   const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
   // Venue-mode fields (unused in field mode). lat/lng are only ever set by
   // copying an Atlas field's details; typing the address by hand has no
   // coordinates (geocoding is deferred), so those events just don't take part
   // in distance sorting.
+  // Who is running the event (e.g. "Screaming Wombats"), shown to players
+  // as the Organizer. Prefilled from the owner's last organizer event, else
+  // their account name; free text per event, like the venue.
+  const [hostName, setHostName] = useState(existing?.hostName ?? defaultHostName);
   const [venueName, setVenueName] = useState(existing?.venueName || "");
   const [address, setAddress] = useState(existing?.address || "");
   const [venueCity, setVenueCity] = useState(existing?.venueCity || "");
@@ -2189,6 +2193,7 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
     startTime !== snapshot.startTime || endTime !== snapshot.endTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     (venueMode && (
+      hostName !== (existing?.hostName ?? defaultHostName) ||
       venueName !== (existing?.venueName || "") || address !== (existing?.address || "") ||
       venueCity !== (existing?.venueCity || "") || venueState !== (existing?.venueState || "") ||
       minimumAge !== (existing?.minimumAge != null ? String(existing.minimumAge) : "") ||
@@ -2324,6 +2329,7 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
     // touching them. Kept in sync on every save. lat/lng only when copied
     // from an Atlas field.
     ...(venueMode ? {
+      hostName: hostName.trim(),
       fieldName: venueName.trim(),
       venueName: venueName.trim(),
       address: address.trim(),
@@ -2410,6 +2416,10 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
   const handleSave = async (draft) => {
     if (!title.trim() || (!draft && !date)) {
       setError(draft ? "Give it a title before saving." : "Title and date are required to publish.");
+      return;
+    }
+    if (venueMode && !draft && !hostName.trim()) {
+      setError("Organizer name is required to publish — players see who is running the event.");
       return;
     }
     if (venueMode && !draft && (!venueName.trim() || !address.trim() || !venueCity.trim() || !venueState)) {
@@ -2580,6 +2590,7 @@ function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, e
 
         {venueMode && (
           <>
+            <TextField label="Organizer" value={hostName} onChange={setHostName} placeholder="e.g. Screaming Wombats" />
             <Eyebrow>Venue</Eyebrow>
             <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
               Where the event is happening. Players see this on the event page and use it to get directions.
@@ -6077,6 +6088,7 @@ export default function App() {
         field={venueMode ? null : activeField}
         venueMode={venueMode}
         ownerUid={user.uid}
+        defaultHostName={(allMyEvents || []).find((e) => e.isMajor && e.hostName)?.hostName || profile.name || ""}
         payoutsEnabled={!!profile.payoutsEnabled}
         existing={editingEvent}
         onBack={closeOverlay}
