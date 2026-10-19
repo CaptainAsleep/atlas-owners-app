@@ -7,7 +7,7 @@ import { db } from "../lib/firebase";
 // isn't the same as showing up, same distinction the player app maintains
 // everywhere else. This is the closest honest thing we have until real
 // RSVP/booking and check-in scanning exist.
-export function useEventWaivers(eventId) {
+export function useEventWaivers(eventId, hostOwnerId) {
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -17,8 +17,15 @@ export function useEventWaivers(eventId) {
       setLoading(false);
       return;
     }
+    // Atlas Major events (hostOwnerId set): the host's read access comes from
+    // resource.data.hostOwnerId in firestore.rules, and Firestore only allows
+    // a list query whose own filters prove the rule — so add that filter.
+    // Field events keep the original eventId-only query, unchanged.
+    const q = hostOwnerId
+      ? query(collection(db, "waiverSignatures"), where("eventId", "==", eventId), where("hostOwnerId", "==", hostOwnerId))
+      : query(collection(db, "waiverSignatures"), where("eventId", "==", eventId));
     const unsub = onSnapshot(
-      query(collection(db, "waiverSignatures"), where("eventId", "==", eventId)),
+      q,
       (snap) => {
         const list = snap.docs.map((d) => d.data());
         list.sort((a, b) => (b.signedAt?.toMillis?.() || 0) - (a.signedAt?.toMillis?.() || 0));
@@ -31,41 +38,66 @@ export function useEventWaivers(eventId) {
       }
     );
     return unsub;
-  }, [eventId]);
+  }, [eventId, hostOwnerId]);
 
   return { signatures, signaturesLoading: loading };
 }
 
-// Recent waiver signings across every field this owner has — genuinely
-// real data for a "recent activity" feed, as opposed to fabricating one.
-export function useRecentActivity(fieldIds) {
-  const [activity, setActivity] = useState([]);
-  const [totalSignatures, setTotalSignatures] = useState(0);
-  const [loading, setLoading] = useState(true);
+// Recent waiver signings across every field this owner has, plus every
+// Atlas Major event they host — genuinely real data for a "recent activity"
+// feed, as opposed to fabricating one. Two listeners (field-keyed and
+// host-keyed) merged client-side; a signature never matches both.
+export function useRecentActivity(fieldIds, hostOwnerId) {
+  const [fieldSigs, setFieldSigs] = useState([]);
+  const [hostSigs, setHostSigs] = useState([]);
+  const [fieldLoading, setFieldLoading] = useState(true);
+  const [hostLoading, setHostLoading] = useState(true);
 
   useEffect(() => {
     if (!fieldIds || fieldIds.length === 0) {
-      setActivity([]);
-      setTotalSignatures(0);
-      setLoading(false);
+      setFieldSigs([]);
+      setFieldLoading(false);
       return;
     }
     const unsub = onSnapshot(
       query(collection(db, "waiverSignatures"), where("fieldId", "in", fieldIds.slice(0, 10))),
       (snap) => {
-        const list = snap.docs.map((d) => d.data());
-        list.sort((a, b) => (b.signedAt?.toMillis?.() || 0) - (a.signedAt?.toMillis?.() || 0));
-        setTotalSignatures(list.length);
-        setActivity(list.slice(0, 5));
-        setLoading(false);
+        setFieldSigs(snap.docs.map((d) => d.data()));
+        setFieldLoading(false);
       },
       (err) => {
-        console.error("useRecentActivity error:", err);
-        setLoading(false);
+        console.error("useRecentActivity (fields) error:", err);
+        setFieldLoading(false);
       }
     );
     return unsub;
   }, [JSON.stringify(fieldIds)]);
 
-  return { activity, totalSignatures, activityLoading: loading };
+  useEffect(() => {
+    if (!hostOwnerId) {
+      setHostSigs([]);
+      setHostLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(collection(db, "waiverSignatures"), where("hostOwnerId", "==", hostOwnerId)),
+      (snap) => {
+        setHostSigs(snap.docs.map((d) => d.data()));
+        setHostLoading(false);
+      },
+      (err) => {
+        console.error("useRecentActivity (host) error:", err);
+        setHostLoading(false);
+      }
+    );
+    return unsub;
+  }, [hostOwnerId]);
+
+  const list = [...fieldSigs, ...hostSigs];
+  list.sort((a, b) => (b.signedAt?.toMillis?.() || 0) - (a.signedAt?.toMillis?.() || 0));
+  return {
+    activity: list.slice(0, 5),
+    totalSignatures: list.length,
+    activityLoading: fieldLoading || hostLoading,
+  };
 }

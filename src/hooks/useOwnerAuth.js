@@ -88,6 +88,30 @@ export function useOwnerAuth() {
     );
   }
 
+  // Organizer agreement is accepted under its OWN keys, separate from the
+  // field-owner acceptedTermsVersion above — the two roles have different
+  // terms and one person can hold both.
+  async function acceptOrganizerTerms(version) {
+    if (!auth.currentUser) return;
+    await setDoc(
+      doc(db, "owners", auth.currentUser.uid),
+      { acceptedOrganizerTermsVersion: version, acceptedOrganizerTermsAt: serverTimestamp() },
+      { merge: true }
+    );
+  }
+
+  // Self-declared roles — { fieldOwner, organizer }. UX tailoring ONLY: the
+  // server never reads this for permissions or fees (those come from field
+  // ownership, hostOwnerId, and the event's own isMajor flag).
+  async function setAccountRoles(roles) {
+    if (!auth.currentUser) return;
+    await setDoc(
+      doc(db, "owners", auth.currentUser.uid),
+      { accountRoles: { fieldOwner: !!roles.fieldOwner, organizer: !!roles.organizer } },
+      { merge: true }
+    );
+  }
+
   async function changePassword(currentPassword, newPassword) {
     if (!auth.currentUser?.email) return;
     const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
@@ -107,6 +131,21 @@ export function useOwnerAuth() {
     await reauthenticateWithCredential(auth.currentUser, credential);
 
     const uid = auth.currentUser.uid;
+    // Organizer events outlive the owner doc (players hold tickets for them),
+    // so refuse to delete while any are still live. Cancel them first (which
+    // issues vouchers) — the Settings screen turns this code into a message.
+    const hostedSnap = await getDocs(query(collection(db, "events"), where("hostOwnerId", "==", uid)));
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const hasLive = hostedSnap.docs.some((d) => {
+      const e = d.data();
+      return !e.draft && !e.deleted && !e.canceled && (e.endDate || e.date || "") >= todayStr;
+    });
+    if (hasLive) {
+      const err = new Error("Upcoming organizer events");
+      err.code = "atlas/upcoming-events";
+      throw err;
+    }
     const ownedFieldsSnap = await getDocs(query(collection(db, "fields"), where("ownerId", "==", uid)));
     await Promise.all(
       ownedFieldsSnap.docs.map((d) =>
@@ -118,5 +157,5 @@ export function useOwnerAuth() {
     await deleteUser(auth.currentUser);
   }
 
-  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount };
+  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount };
 }

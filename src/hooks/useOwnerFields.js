@@ -40,6 +40,10 @@ export function useMyFields(uid) {
       setLoading(false);
       return;
     }
+    // Back to "loading" whenever the uid changes (e.g. logging in after the
+    // app mounted signed-out) so "no fields yet" can't be mistaken for "no
+    // fields" — the role picker waits on this.
+    setLoading(true);
     const unsub = onSnapshot(
       query(collection(db, "fields"), where("ownerId", "==", uid)),
       (snap) => {
@@ -70,6 +74,10 @@ export function useMyPendingClaims(uid) {
       setLoading(false);
       return;
     }
+    // Back to "loading" whenever the uid changes (e.g. logging in after the
+    // app mounted signed-out) so "no fields yet" can't be mistaken for "no
+    // fields" — the role picker waits on this.
+    setLoading(true);
     const unsub = onSnapshot(
       query(collection(db, "fields"), where("claimRequestedBy", "==", uid), where("claimPending", "==", true)),
       (snap) => {

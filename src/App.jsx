@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
-import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA } from "./legalText";
+import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA, ORGANIZER_TERMS_VERSION, ORGANIZER_TERMS_OF_USE, ORGANIZER_PRIVACY_POLICY, ORGANIZER_EULA } from "./legalText";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
@@ -426,14 +426,14 @@ function LoginScreen({ signIn, signUp }) {
         <div className="w-14 h-14 flex items-center justify-center mb-3 overflow-hidden" style={{ borderRadius: 8 }}>
           <img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="Atlas" className="w-full h-full" style={{ objectFit: "cover" }} />
         </div>
-        <span className="text-lg font-semibold" style={{ ...display, color: T.ash, letterSpacing: "0.1em" }}>ATLAS FOR FIELD OWNERS</span>
+        <span className="text-lg font-semibold" style={{ ...display, color: T.ash, letterSpacing: "0.1em" }}>ATLAS FOR HOSTS</span>
       </div>
 
       <form onSubmit={handleSubmit}>
         {mode === "signup" && (
           <TextField label="Your Name" value={name} onChange={setName} placeholder="Full name" />
         )}
-        <TextField label="Email" value={email} onChange={setEmail} placeholder="you@field.com" type="email" />
+        <TextField label="Email" value={email} onChange={setEmail} placeholder="you@yourfield.com" type="email" />
         <TextField label="Password" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
         {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
         <button
@@ -451,14 +451,17 @@ function LoginScreen({ signIn, signUp }) {
         className="text-center text-[13px] mt-4 transition-transform duration-100 active:scale-95"
         style={{ ...body, color: T.accent }}
       >
-        {mode === "signin" ? "New field owner? Create an account" : "Already have an account? Sign in"}
+        {mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
       </button>
     </div>
   );
 }
 
 /* ---------- Dashboard ---------- */
-function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onOpenYearInReview, onLogout }) {
+function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pendingLoading, events, eventsLoading, activity, activityLoading, onOpenField, onOpenClaim, onOpenEventsList, onCreateEvent, onOpenEvent, onOpenPayouts, onOpenBilling, onOpenYearInReview, onLogout, isFieldOwner, isOrganizer }) {
+  // Organizer-only accounts have no fields to list; everyone else sees
+  // the original My Fields section exactly as before.
+  const showFieldsSection = isFieldOwner || !isOrganizer;
   const today = localDateStr();
   const upcoming = events.filter((e) => !e.draft && !e.deleted && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
   const totalInterest = events.filter((e) => !e.deleted).reduce((sum, e) => sum + (e.interestCount || 0), 0);
@@ -517,7 +520,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
             <ChevronRight size={16} color="#FFFFFF" />
           </button>
         )}
-        {myFields.length > 0 && !profile?.payoutsEnabled && (
+        {(myFields.length > 0 || isOrganizer) && !profile?.payoutsEnabled && (
           <button
             onClick={onOpenPayouts}
             className="w-full mb-5 p-4 flex items-center gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
@@ -547,7 +550,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
           </>
         )}
 
-        {myFields.length > 0 && (
+        {(myFields.length > 0 || isOrganizer) && (
           <>
             <Eyebrow>Overview</Eyebrow>
             <div className="grid grid-cols-2 gap-3 mb-5">
@@ -572,7 +575,7 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               <div className="p-4 mb-5" style={{ borderRadius: T.rHero, background: "linear-gradient(135deg,#0e2c47,#1c3f63)", boxShadow: "0 10px 24px -8px rgba(0,44,72,0.35)" }}>
                 <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: "rgba(255,255,255,0.6)", letterSpacing: "0.04em" }}>Projected Revenue (Gross, Upcoming)</div>
                 <div className="text-[26px] font-semibold" style={{ ...display, color: "#fff" }}>${totalProjectedRevenue.toFixed(2)}</div>
-                <div className="text-[9px] mt-0.5" style={{ ...body, color: "rgba(255,255,255,0.55)" }}>Summed across every upcoming event at full capacity, across all your fields — not a real payment yet</div>
+                <div className="text-[9px] mt-0.5" style={{ ...body, color: "rgba(255,255,255,0.55)" }}>Summed across every upcoming event at full capacity, {isOrganizer ? "across all your events" : "across all your fields"} — not a real payment yet</div>
               </div>
             )}
           </>
@@ -642,6 +645,16 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
           </>
         )}
 
+        {isOrganizer && !showFieldsSection && !eventsLoading && events.filter((e) => !e.deleted).length === 0 && (
+          <div className="p-6 mb-5 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <Calendar size={22} color={T.ashDim} className="mb-2" />
+            <div className="text-[14px] font-semibold mb-1" style={{ ...display, color: T.ash }}>No events yet</div>
+            <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Create your first event — add the venue, set the date and price, and publish when you're ready. Set up payouts first if it's a paid event.</p>
+          </div>
+        )}
+
+        {showFieldsSection && (
+        <>
         <div className="mb-4 flex items-center justify-between">
           <Eyebrow>My Fields</Eyebrow>
           <button onClick={onOpenClaim} className="text-[12px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, color: T.accent }}>
@@ -673,6 +686,8 @@ function DashboardScreen({ profile, myFields, myFieldsLoading, pendingFields, pe
               <ChevronRight size={16} color={T.ashFaint} />
             </button>
           ))
+        )}
+        </>
         )}
       </div>
 
@@ -1722,7 +1737,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
   // deliberately gated the same way, per the 2026-09-28 scoping's
   // Decision #4, rather than fetched unconditionally.
   const { bookings: aarBookings, bookingsLoading: aarBookingsLoading } = useEventBookings(isPast ? ev.id : null);
-  const { signatures: aarSignatures } = useEventWaivers(isPast ? ev.id : null);
+  const { signatures: aarSignatures } = useEventWaivers(isPast ? ev.id : null, ev.hostOwnerId);
   const { interestedCount: aarInterestedCount } = useEventInterestedCount(isPast ? ev.id : null);
   const { reservationBookings: aarAllBookings } = useOwnerReservationStats(isPast ? (allMyEvents || []) : []);
 
@@ -1789,6 +1804,8 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
         <div className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>
           {ev.fieldName} · {ev.date || "No date set"}{ev.endDate ? ` – ${ev.endDate}` : ""}{ev.startTime ? ` · ${formatTimeStr(ev.startTime)}` : ""}{ev.endTime ? ` – ${formatTimeStr(ev.endTime)}` : ""}
         </div>
+        {/* Organizer events have no field page to deep-link to. */}
+        {!ev.isMajor && (
         <button
           onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${ev.fieldId}`, "_blank", "noopener,noreferrer")}
           className="w-full mb-4 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
@@ -1798,6 +1815,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
           <ExternalLink size={14} color={T.ash} />
           <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>View as Player</span>
         </button>
+        )}
 
         <div className="grid grid-cols-3 gap-2 mb-5">
           <button
@@ -1981,9 +1999,46 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
   );
 }
 
-function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, newEventId, allFields }) {
+// Two modes. Field mode (venueMode false) is the original editor, tied to a
+// claimed field. Venue mode is the organizer form: no field, the venue is
+// typed in (or copied from an Atlas field) and lives on the event itself.
+// The mode is fixed for an event's life — isMajor/fieldId/hostOwnerId are
+// immutable in the Firestore rules.
+function EventEditScreen({ field, venueMode = false, ownerUid, payoutsEnabled, existing, onBack, createEvent, createMajorEvent, updateEvent, newEventId, allFields }) {
   const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
+  // Venue-mode fields (unused in field mode). lat/lng are only ever set by
+  // copying an Atlas field's details; typing the address by hand has no
+  // coordinates (geocoding is deferred), so those events just don't take part
+  // in distance sorting.
+  const [venueName, setVenueName] = useState(existing?.venueName || "");
+  const [address, setAddress] = useState(existing?.address || "");
+  const [venueCity, setVenueCity] = useState(existing?.venueCity || "");
+  const [venueState, setVenueState] = useState(existing?.venueState || "");
+  const [minimumAge, setMinimumAge] = useState(existing?.minimumAge != null ? String(existing.minimumAge) : "");
+  const [venueLat, setVenueLat] = useState(typeof existing?.lat === "number" ? existing.lat : null);
+  const [venueLng, setVenueLng] = useState(typeof existing?.lng === "number" ? existing.lng : null);
+  const [prefillFrom, setPrefillFrom] = useState(null);
+  const [venueSearch, setVenueSearch] = useState("");
+  const venueSearchQ = venueSearch.trim().toLowerCase();
+  const prefillMatches = venueMode && venueSearchQ.length >= 2
+    ? (allFields || []).filter((f) => (f.name || "").toLowerCase().includes(venueSearchQ) || (f.city || "").toLowerCase().includes(venueSearchQ)).slice(0, 6)
+    : [];
+  // A hand-edited address no longer matches the copied pin, so drop it.
+  const clearCoords = () => { setVenueLat(null); setVenueLng(null); };
+  const applyPrefill = (f) => {
+    const v = venueFromField(f);
+    setVenueName(v.venueName);
+    setAddress(v.address);
+    setVenueCity(v.venueCity);
+    setVenueState(v.venueState);
+    setVenueLat(v.lat);
+    setVenueLng(v.lng);
+    setPrefillFrom(f.name || "that field");
+    setVenueSearch("");
+  };
+  const bannerStoragePath = () => (venueMode ? `hostEventBanners/${ownerUid}/${eventId}/banner.jpg` : `eventBanners/${field.id}/${eventId}/banner.jpg`);
+  const patchStoragePath = () => (venueMode ? `hostEventPatches/${ownerUid}/${eventId}/patch.jpg` : `eventPatches/${field.id}/${eventId}/patch.jpg`);
   const [date, setDate] = useState(existing?.date || "");
   const [endDate, setEndDate] = useState(existing?.endDate || "");
   const [startTime, setStartTime] = useState(existing?.startTime || "");
@@ -2044,6 +2099,13 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     title !== snapshot.title || date !== snapshot.date || endDate !== snapshot.endDate ||
     startTime !== snapshot.startTime || endTime !== snapshot.endTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
+    (venueMode && (
+      venueName !== (existing?.venueName || "") || address !== (existing?.address || "") ||
+      venueCity !== (existing?.venueCity || "") || venueState !== (existing?.venueState || "") ||
+      minimumAge !== (existing?.minimumAge != null ? String(existing.minimumAge) : "") ||
+      venueLat !== (typeof existing?.lat === "number" ? existing.lat : null) ||
+      venueLng !== (typeof existing?.lng === "number" ? existing.lng : null)
+    )) ||
     waiverText !== (existing?.waiver?.text || "") ||
     patchName !== (existing?.checkInPatch?.name || "") || patchImageUrl !== (existing?.checkInPatch?.imageUrl || null) ||
     priceOptionsLabel !== (existing?.priceOptions?.label || "") ||
@@ -2075,7 +2137,8 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
   // distance is exactly the kind of noise this is meant to avoid.
   const [competingEvents, setCompetingEvents] = useState([]);
   useEffect(() => {
-    if (!date) {
+    // Venue mode has no field to measure from, so no nearby-conflict check.
+    if (!date || venueMode) {
       setCompetingEvents([]);
       return;
     }
@@ -2114,7 +2177,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     setError("");
     try {
       const resized = await resizeImageFile(file, 1200, 0.85);
-      const storageRef = ref(storage, `eventBanners/${field.id}/${eventId}/banner.jpg`);
+      const storageRef = ref(storage, bannerStoragePath());
       await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
       const url = await getDownloadURL(storageRef);
       setImageUrl(url);
@@ -2134,7 +2197,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     setError("");
     try {
       const resized = await resizeImageFile(file, 500, 0.9);
-      const storageRef = ref(storage, `eventPatches/${field.id}/${eventId}/patch.jpg`);
+      const storageRef = ref(storage, patchStoragePath());
       await uploadBytes(storageRef, resized, { contentType: "image/jpeg" });
       const url = await getDownloadURL(storageRef);
       setPatchImageUrl(url);
@@ -2156,7 +2219,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     setPatchName("");
     setPatchImageUrl(null);
     try {
-      await deleteObject(ref(storage, `eventPatches/${field.id}/${eventId}/patch.jpg`));
+      await deleteObject(ref(storage, patchStoragePath()));
     } catch {
       // file may already be gone — not worth failing the UI over
     }
@@ -2164,6 +2227,21 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
 
   const buildData = (draft) => ({
     title: title.trim(),
+    // Organizer events carry their venue on the event itself. fieldName
+    // mirrors venueName: the player app and many display sites already render
+    // ev.fieldName as "where", so a Major shows up right everywhere without
+    // touching them. Kept in sync on every save. lat/lng only when copied
+    // from an Atlas field.
+    ...(venueMode ? {
+      fieldName: venueName.trim(),
+      venueName: venueName.trim(),
+      address: address.trim(),
+      venueCity: venueCity.trim(),
+      venueState,
+      minimumAge: minimumAge.trim() && Number.isFinite(parseInt(minimumAge, 10)) ? parseInt(minimumAge, 10) : null,
+      lat: venueLat,
+      lng: venueLng,
+    } : {}),
     date,
     endDate: endDate || null,
     startTime: startTime || null,
@@ -2174,7 +2252,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
     // (weapon class, BB weight, etc.) — null for a normal flat-price or
     // free event. Only choices with both a label and a price are kept;
     // a half-filled row just gets dropped rather than saved broken.
-    priceOptions: (() => {
+    priceOptions: venueMode ? null : (() => {
       const validChoices = priceOptionsChoices
         .filter((c) => c.label.trim() && c.price.trim())
         .map((c) => ({ id: c.id, label: c.label.trim(), priceCents: Math.round((parsePrice(c.price) || 0) * 100) }));
@@ -2213,12 +2291,27 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
       setError(draft ? "Give it a title before saving." : "Title and date are required to publish.");
       return;
     }
+    if (venueMode && !draft && (!venueName.trim() || !address.trim() || !venueCity.trim() || !venueState)) {
+      setError("Venue name, address, city and state are required to publish — players need to know where to go.");
+      return;
+    }
+    // A paid event can't take payment until payouts are set up (the booking
+    // function refuses to start checkout for a host with no connected
+    // account), so publishing one would put a broken Reserve button in front
+    // of players. Drafts are still fine. (Field events keep their existing
+    // behavior; this gate is organizer events only.)
+    if (venueMode && !draft && !isFreeEvent && parsePrice(price) !== null && !payoutsEnabled) {
+      setError("Set up payouts first (Dashboard → Set up payouts) — players can't pay for a paid event until that's done. You can still save it as a draft.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const data = buildData(draft);
       if (existing) {
         await updateEvent(eventId, data);
+      } else if (venueMode) {
+        await createMajorEvent(ownerUid, data, eventId);
       } else {
         await createEvent(field.id, field.name, data, eventId);
       }
@@ -2240,6 +2333,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
       </div>
 
       <div className="px-6 pt-4" style={{ maxWidth: "100%" }}>
+        {!venueMode && (
         <button
           onClick={() => window.open(`https://playerapp.airsoftatlas.app/?field=${field.id}`, "_blank", "noopener,noreferrer")}
           className="w-full mb-4 py-2.5 flex items-center justify-center gap-2 transition-transform duration-100 active:scale-[0.98]"
@@ -2249,6 +2343,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           <ExternalLink size={14} color={T.ash} />
           <span className="text-[13px] font-semibold" style={{ ...body, color: T.ash }}>View as Player</span>
         </button>
+        )}
 
         <Eyebrow>Event Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
@@ -2360,6 +2455,62 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           </div>
         </div>
 
+        {venueMode && (
+          <>
+            <Eyebrow>Venue</Eyebrow>
+            <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+              Where the event is happening. Players see this on the event page and use it to get directions.
+            </p>
+            <div className="mb-3">
+              <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Copy from an Atlas field (optional)</label>
+              <input
+                value={venueSearch}
+                onChange={(e) => setVenueSearch(e.target.value)}
+                placeholder="Search by field name or city"
+                className="w-full px-3 py-2.5 text-[14px] bg-transparent outline-none"
+                style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: T.rTight, color: T.ash, boxSizing: "border-box" }}
+              />
+              {prefillMatches.length > 0 && (
+                <div className="mt-1 flex flex-col" style={{ background: T.panel, borderRadius: T.rTight, boxShadow: T.shadowMd }}>
+                  {prefillMatches.map((f) => (
+                    <button key={f.id} onClick={() => applyPrefill(f)} className="px-3 py-2 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                      <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}</div>
+                      <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{f.city}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {prefillFrom && (
+                <p className="text-[10px] mt-1" style={{ ...body, color: T.ashFaint }}>
+                  Copied from {prefillFrom} — check it's right. This is just a copy of the field's public details; it doesn't link your event to that field or mean its owner has agreed to host it.
+                </p>
+              )}
+            </div>
+            <TextField label="Venue Name" value={venueName} onChange={setVenueName} placeholder="e.g. Camp Ripley Training Site" />
+            <TextField label="Street Address" value={address} onChange={(v) => { setAddress(v); clearCoords(); }} placeholder="123 County Rd 4" />
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">
+                <TextField label="City" value={venueCity} onChange={(v) => { setVenueCity(v); clearCoords(); }} placeholder="Little Falls" />
+              </div>
+              <div className="flex-1 min-w-0 mb-3">
+                <label className="text-[10px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>State</label>
+                <select
+                  value={venueState}
+                  onChange={(e) => { setVenueState(e.target.value); clearCoords(); }}
+                  className="w-full px-2 py-2.5 text-[14px] outline-none"
+                  style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: T.rTight, color: venueState ? T.ash : T.ashFaint, height: 48, boxSizing: "border-box" }}
+                >
+                  <option value="">Select…</option>
+                  {Object.entries(US_STATES).map(([code, name]) => (
+                    <option key={code} value={code}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <TextField label="Minimum Age (optional)" value={minimumAge} onChange={setMinimumAge} placeholder="e.g. 18" type="number" />
+          </>
+        )}
+
         <Eyebrow>Pricing & Capacity</Eyebrow>
         <label className="flex items-center gap-2 mb-3 text-[12px]" style={{ ...body, color: T.ashDim }}>
           <input type="checkbox" checked={isFreeEvent} onChange={(e) => toggleFreeEvent(e.target.checked)} />
@@ -2387,12 +2538,26 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${projectedRevenue}</span> — entry cost × capacity, not a real payment yet
           </p>
         )}
-        {!isFreeEvent && price.trim() && parsePrice(price) === null && priceOptionsChoices.filter((c) => c.label.trim() && c.price.trim()).length === 0 && (
+        {!venueMode && !isFreeEvent && price.trim() && parsePrice(price) === null && priceOptionsChoices.filter((c) => c.label.trim() && c.price.trim()).length === 0 && (
           <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.alert }}>
             Heads up — since "{price.trim()}" isn't a plain number, this event won't collect any payment in the app right now. Use Price Options below if the real cost varies by player, or enter a plain number (e.g. 25) for a flat price.
           </p>
         )}
 
+        {venueMode && !isFreeEvent && price.trim() && parsePrice(price) === null && (
+          <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.alert }}>
+            Heads up — since "{price.trim()}" isn't a plain number, this event won't collect any payment in the app. Enter a plain number (e.g. 25) for a flat ticket price.
+          </p>
+        )}
+        {venueMode && !isFreeEvent && (
+          <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.ashFaint }}>
+            One flat price per ticket. Atlas's fee (3.5% + $1.30 per ticket, no cap) comes out of your payout — players pay exactly the price you set.
+            {!payoutsEnabled && <span style={{ color: T.alert }}> Payouts aren't set up yet, so you can save a paid event as a draft but not publish it.</span>}
+          </p>
+        )}
+
+        {!venueMode && (
+        <>
         <div className="mb-2 flex items-center justify-between">
           <label className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Price Options</label>
           <button onClick={addPriceChoice} className="text-[12px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, color: T.accent }}>+ Add Choice</button>
@@ -2422,6 +2587,8 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             </div>
           </div>
         ))}
+        </>
+        )}
 
         <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
@@ -2431,7 +2598,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
           Document upload isn't available yet — a real, complete document would need to be embedded and made
           signable in-app to actually work, which is a bigger piece; entering the text directly here works today.
         </p>
-        {field.savedWaivers?.length > 0 && (
+        {!venueMode && field.savedWaivers?.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {field.savedWaivers.map((w, i) => (
               <button
@@ -2445,7 +2612,7 @@ function EventEditScreen({ field, existing, onBack, createEvent, updateEvent, ne
             ))}
           </div>
         )}
-        <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder="Paste or write your field's waiver text here…" />
+        <TextField value={waiverText} onChange={setWaiverText} rows={6} placeholder={venueMode ? "Paste or write your event's waiver text here…" : "Paste or write your field's waiver text here…"} />
 
         <Eyebrow>Check-In Reward Patch</Eyebrow>
         <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
@@ -2602,15 +2769,19 @@ function LoadingScreen() {
   );
 }
 
-function LegalAgreementScreen({ onAccept }) {
+// `kind` picks the agreement set: "field" (field owners, the original text)
+// or "organizer" (event organizers, DRAFT). App() passes a `key` per kind so
+// the tab/checkbox state resets if both are ever needed back to back.
+function LegalAgreementScreen({ onAccept, kind = "field" }) {
   const [tab, setTab] = useState("terms");
   const [checked, setChecked] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const isOrganizerKind = kind === "organizer";
   const TABS = [
-    { key: "terms", label: "Terms of Use", text: TERMS_OF_USE },
-    { key: "privacy", label: "Privacy Policy", text: PRIVACY_POLICY },
-    { key: "eula", label: "EULA", text: EULA },
+    { key: "terms", label: "Terms of Use", text: isOrganizerKind ? ORGANIZER_TERMS_OF_USE : TERMS_OF_USE },
+    { key: "privacy", label: "Privacy Policy", text: isOrganizerKind ? ORGANIZER_PRIVACY_POLICY : PRIVACY_POLICY },
+    { key: "eula", label: "EULA", text: isOrganizerKind ? ORGANIZER_EULA : EULA },
   ];
   const activeText = TABS.find((t) => t.key === tab).text;
 
@@ -2660,6 +2831,123 @@ function LegalAgreementScreen({ onAccept }) {
       </div>
     </div>
   );
+}
+
+// One-time "what do you do?" screen for accounts that haven't said yet (new
+// signups, or an owner account with no field). Multi-select: a field owner
+// who also runs events elsewhere picks both. Purely tailors the app — the
+// server never reads this for permissions or fees — and it can be changed
+// any time under Settings > Account Type.
+function RoleSelectionScreen({ onSave, onLogout }) {
+  const [fieldOwner, setFieldOwner] = useState(false);
+  const [organizer, setOrganizer] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const options = [
+    {
+      key: "fieldOwner",
+      on: fieldOwner,
+      toggle: () => setFieldOwner(!fieldOwner),
+      title: "I own or manage a field",
+      body: "Claim your field, manage its page, and run events there.",
+    },
+    {
+      key: "organizer",
+      on: organizer,
+      toggle: () => setOrganizer(!organizer),
+      title: "I organize events",
+      body: "Run events at fields or sites you don't own. You add the venue details on each event.",
+    },
+  ];
+
+  const handleContinue = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave({ fieldOwner, organizer });
+    } catch (err) {
+      console.error("setAccountRoles failed:", err);
+      setError("Couldn't save that — try again.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col px-6 overflow-y-auto" style={flatBg}>
+      <style>{FONTS}</style>
+      <div className="pt-10 pb-4">
+        <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>What brings you to Atlas?</h1>
+        <p className="text-[13px]" style={{ ...body, color: T.ashDim }}>
+          Pick everything that fits — we'll set the app up around it. You can change this later in Settings.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3 mb-4">
+        {options.map((o) => (
+          <button
+            key={o.key}
+            onClick={o.toggle}
+            className="w-full p-4 flex items-start gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, outline: o.on ? `2px solid ${T.accent}` : "2px solid transparent", outlineOffset: -2 }}
+          >
+            <div className="w-5 h-5 mt-0.5 flex-shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${o.on ? T.accent : T.line}`, background: o.on ? T.accent : "transparent", borderRadius: 4 }}>
+              {o.on && <Check size={13} color="#fff" strokeWidth={3} />}
+            </div>
+            <div>
+              <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{o.title}</div>
+              <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>{o.body}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+      {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+      <PrimaryButton onClick={handleContinue} disabled={saving || (!fieldOwner && !organizer)}>{saving ? "Saving…" : "Continue"}</PrimaryButton>
+      <button onClick={onLogout} className="text-center text-[12px] mt-4 pb-8" style={{ ...body, color: T.ashFaint }}>Sign out</button>
+    </div>
+  );
+}
+
+// Venue state picker for Atlas Major events. Stored as the 2-letter code
+// (venueState); the player app maps it back to a full name for its state
+// selector (eventStateName in atlas-players-app).
+const US_STATES = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+// Copies an Atlas field's details into venue-form values. A field stores
+// city as "City, ST" (or occasionally just a state name); older scraped
+// addresses can already include city/state — that's fine, the player app
+// avoids repeating them. Returns a SNAPSHOT: no link to the field is kept.
+function venueFromField(f) {
+  let city = "";
+  let state = "";
+  const raw = (f.city || "").trim();
+  const m = raw.match(/^(.*?),\s*([A-Z]{2})\s*$/);
+  if (m) {
+    city = m[1].trim();
+    state = US_STATES[m[2]] ? m[2] : "";
+  } else {
+    const code = Object.keys(US_STATES).find((k) => US_STATES[k] === raw);
+    if (code) state = code;
+    else city = raw;
+  }
+  return {
+    venueName: f.name || "",
+    address: f.address || "",
+    venueCity: city,
+    venueState: state,
+    lat: typeof f.lat === "number" ? f.lat : null,
+    lng: typeof f.lng === "number" ? f.lng : null,
+  };
 }
 
 // Generated tones, not an audio file — no asset to bundle or host, and it
@@ -2817,7 +3105,7 @@ function CheckInScreen({ event, onBack }) {
 
 /* ---------- Roster ---------- */
 function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile }) {
-  const { signatures, signaturesLoading } = useEventWaivers(event.id);
+  const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId);
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const attendeeDetails = useAttendeeDetails(event.id, bookings);
   const bannedUids = new Set(banned.map((b) => b.uid));
@@ -2840,7 +3128,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         ? confirmGrant.booking.entryPriceCents * Math.max(1, confirmGrant.booking.attendeeCount || 1)
         : Math.max(0, confirmGrant.booking.amountPaidCents
             - (confirmGrant.booking.selectedRentals || []).reduce((s, r) => s + (typeof r.priceCents === "number" ? r.priceCents : 0), 0)
-            - (profile?.feeModel !== "absorb" ? (confirmGrant.booking.bookingFeeCents || 0) : 0)))
+            - (profile?.feeModel !== "absorb" && !event.isMajor ? (confirmGrant.booking.bookingFeeCents || 0) : 0)))
     : 0;
 
   const handleConfirmGrant = async () => {
@@ -2938,7 +3226,8 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               <Ticket size={12} /> Give Voucher
             </button>
           )}
-          {isBanned ? (
+          {/* Bans are per field — organizer events have no field to ban from. */}
+          {event.fieldId && (isBanned ? (
             <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
               Unban
             </button>
@@ -2946,7 +3235,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button onClick={() => banPlayer(event.fieldId, uid, name)} className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}>
               Ban
             </button>
-          )}
+          ))}
         </div>
       </div>
     );
@@ -3393,7 +3682,7 @@ function OwnerBottomNav({ active, onNavigate }) {
 }
 
 /* ---------- Events hub (top-level tab — all events across every claimed field) ---------- */
-function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, restoreEvent, duplicateEvent, updateEvent, profile }) {
+function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onStartNewEvent, onEditEvent, onOpenOverview, onOpenRoster, deleteEvent, restoreEvent, duplicateEvent, updateEvent, profile, isOrganizer }) {
   const [tab, setTab] = useState("upcoming");
   const [searchQuery, setSearchQuery] = useState("");
   const [pickerFieldId, setPickerFieldId] = useState(myFields[0]?.id || null);
@@ -3401,9 +3690,13 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   const [confirmPublish, setConfirmPublish] = useState(null);
   const [confirmCancel, setConfirmCancel] = useState(null);
   const [cancelError, setCancelError] = useState("");
+  const [publishError, setPublishError] = useState("");
   const [expirationDays, setExpirationDays] = useState(365);
   const [busy, setBusy] = useState(false);
   const today = localDateStr();
+  // An organizer (Major) event has no claimed field — null here is handled by
+  // the open/edit handlers in App().
+  const fieldFor = (ev) => (ev.isMajor ? null : (myFields.find((f) => f.id === ev.fieldId) || myFields[0]));
 
   const filtered = events
     .filter((ev) => {
@@ -3423,10 +3716,11 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
 
   const handleDuplicate = async (ev) => {
     const newId = await duplicateEvent(ev);
-    onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], { ...ev, id: newId, title: `${ev.title} (Copy)`, date: "", draft: true });
+    onEditEvent(fieldFor(ev), { ...ev, id: newId, title: `${ev.title} (Copy)`, date: "", draft: true, ...(ev.isMajor ? { bookedCount: 0 } : {}) });
   };
 
   const handleNew = () => {
+    if (isOrganizer) { onStartNewEvent(); return; }
     const field = myFields.find((f) => f.id === pickerFieldId) || myFields[0];
     if (field) onNewEvent(field);
   };
@@ -3469,6 +3763,22 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
   };
 
   const handleConfirmPublish = async () => {
+    // Organizer events: same gates as the Publish button inside the editor —
+    // a draft saved before the venue was filled in (or before payouts were
+    // set up) must not go live through this shortcut. Field events are
+    // untouched.
+    const pev = confirmPublish;
+    if (pev.isMajor) {
+      if (!pev.date || !pev.venueName || !pev.address || !pev.venueCity || !pev.venueState) {
+        setPublishError("This draft is missing a date or venue details — open it with the pencil button and finish those first.");
+        return;
+      }
+      if (!isBlankPriceText(pev.price) && parsePrice(pev.price) !== null && !profile?.payoutsEnabled) {
+        setPublishError("Set up payouts first (Dashboard → Set up payouts) — players can't pay for a paid event until that's done.");
+        return;
+      }
+    }
+    setPublishError("");
     setBusy(true);
     try {
       await updateEvent(confirmPublish.id, { draft: false });
@@ -3485,7 +3795,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
       </div>
 
       <div className="px-6">
-        {myFields.length === 0 ? (
+        {myFields.length === 0 && !isOrganizer ? (
           <div className="p-6 flex flex-col items-center text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <Calendar size={22} color={T.ashDim} className="mb-2" />
             <div className="text-[13px] font-semibold" style={{ ...display, color: T.ash }}>Claim a field first</div>
@@ -3493,7 +3803,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           </div>
         ) : (
           <>
-            {myFields.length > 1 && (
+            {myFields.length > 1 && !isOrganizer && (
               <div className="mb-3 flex gap-2 flex-wrap">
                 {myFields.map((f) => (
                   <button
@@ -3544,7 +3854,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
         ) : (
           filtered.map((ev) => (
             <div key={ev.id} className="mb-3 p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
-              <button onClick={() => onOpenOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="w-full text-left transition-transform duration-100 active:scale-[0.98]">
+              <button onClick={() => onOpenOverview(fieldFor(ev), ev)} className="w-full text-left transition-transform duration-100 active:scale-[0.98]">
                 <div className="flex items-start justify-between mb-1">
                   <div className="flex items-center gap-2">
                     {ev.deleted ? (
@@ -3573,7 +3883,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
                 )}
               </button>
               <div className="flex gap-2 flex-wrap">
-                <button onClick={() => onEditEvent(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)} className="px-3 py-2 flex items-center justify-center transition-transform duration-100 active:scale-95" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+                <button onClick={() => onEditEvent(fieldFor(ev), ev)} className="px-3 py-2 flex items-center justify-center transition-transform duration-100 active:scale-95" style={{ border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                   <Pencil size={14} />
                 </button>
                 <button onClick={() => onOpenRoster(ev)} className="flex-1 py-2 text-[12px] font-medium flex items-center justify-center gap-1 transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
@@ -3619,7 +3929,7 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
           <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Cancel this event?</div>
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
-              "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. Any player who already paid for a ticket gets a digital voucher, good for a future event at this field, instead of a refund. This keeps the real record, unlike delete, and can be reversed by editing the event again.
+              "{confirmCancel.title}" will be marked canceled — anyone who reserved or favorited it will see that. Any player who already paid for a ticket gets a digital voucher, good for a future event {confirmCancel.isMajor ? "you run" : "at this field"}, instead of a refund. This keeps the real record, unlike delete, and can be reversed by editing the event again.
             </p>
             <label className="block mb-4">
               <span className="block text-[11px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Vouchers expire after (days)</span>
@@ -3669,14 +3979,17 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onEditEv
       )}
 
       {confirmPublish && (
-        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && setConfirmPublish(null)}>
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && (setConfirmPublish(null), setPublishError(""))}>
           <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
             <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Publish this event?</div>
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
               "{confirmPublish.title}" will become visible to players immediately.
             </p>
+            {publishError && (
+              <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{publishError}</p>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => setConfirmPublish(null)} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+              <button onClick={() => { setConfirmPublish(null); setPublishError(""); }} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
                 Cancel
               </button>
               <button onClick={handleConfirmPublish} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...display, background: T.good, color: "#fff", borderRadius: T.rPill, boxShadow: T.shadowSm, opacity: busy ? 0.6 : 1 }}>
@@ -3823,8 +4136,10 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
   const fieldRevenue = (() => {
     const byField = {};
     records.forEach((r) => {
-      const key = r.fieldId || "unknown";
-      if (!byField[key]) byField[key] = { id: key, name: r.fieldName || "Unknown field", cents: 0 };
+      // Organizer events have no field (fieldId null), and their fieldName is
+      // a per-event venue — group them together rather than as "Unknown".
+      const key = r.fieldId || "other-venues";
+      if (!byField[key]) byField[key] = { id: key, name: r.fieldId ? (r.fieldName || "Unknown field") : "Other venues", cents: 0 };
       byField[key].cents += r.netCents;
     });
     return Object.values(byField).sort((a, b) => b.cents - a.cents);
@@ -4616,7 +4931,11 @@ function PayoutsScreen({ profile, onBack, checking }) {
   );
 }
 
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, onOpenBilling, onOpenPayouts, onOpenYearInReview, onLogout }) {
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, setAccountRoles, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onLogout }) {
+  // Organizer-only accounts have no field fee model to show.
+  const showFieldFee = isFieldOwner || !isOrganizer;
+  const [rolesSaving, setRolesSaving] = useState(false);
+  const [rolesError, setRolesError] = useState("");
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -4666,7 +4985,26 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
     if (code === "auth/invalid-credential" || code === "auth/wrong-password") return "Current password is incorrect.";
     if (code === "auth/weak-password") return "New password needs to be at least 6 characters.";
     if (code === "auth/too-many-requests") return "Too many attempts — wait a bit and try again.";
+    if (code === "atlas/upcoming-events") return "You still have upcoming events people may have tickets for. Cancel them first (that issues vouchers to anyone who paid), then delete your account.";
     return "Something went wrong — try again.";
+  };
+
+  // Account type is UX tailoring only (it changes what the app shows you, not
+  // what you're allowed to do or what you're charged). A field can't be
+  // "un-owned" from here, and at least one type must stay on.
+  const changeRole = async (key, value) => {
+    const next = { fieldOwner: isFieldOwner, organizer: isOrganizer, [key]: value };
+    if (!next.fieldOwner && !next.organizer) return;
+    setRolesSaving(true);
+    setRolesError("");
+    try {
+      await setAccountRoles(next);
+    } catch (err) {
+      console.error("setAccountRoles failed:", err);
+      setRolesError("Couldn't save that — try again.");
+    } finally {
+      setRolesSaving(false);
+    }
   };
 
   const submitPasswordChange = async (e) => {
@@ -4703,10 +5041,18 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
   };
 
   const LEGAL_TABS = [
-    { key: "terms", label: "Terms of Use", text: TERMS_OF_USE },
-    { key: "privacy", label: "Privacy Policy", text: PRIVACY_POLICY },
-    { key: "eula", label: "EULA", text: EULA },
+    ...(showFieldFee ? [
+      { key: "terms", label: "Terms of Use", text: TERMS_OF_USE },
+      { key: "privacy", label: "Privacy Policy", text: PRIVACY_POLICY },
+      { key: "eula", label: "EULA", text: EULA },
+    ] : []),
+    ...(isOrganizer ? [
+      { key: "o-terms", label: showFieldFee ? "Organizer Terms" : "Terms of Use", text: ORGANIZER_TERMS_OF_USE },
+      { key: "o-privacy", label: showFieldFee ? "Organizer Privacy" : "Privacy Policy", text: ORGANIZER_PRIVACY_POLICY },
+      { key: "o-eula", label: showFieldFee ? "Organizer EULA" : "EULA", text: ORGANIZER_EULA },
+    ] : []),
   ];
+  const activeLegal = LEGAL_TABS.find((t) => t.key === legalTab) || LEGAL_TABS[0];
 
   return (
     <div className="h-full overflow-y-auto pb-24" style={flatBg}>
@@ -4725,6 +5071,35 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
 
+        <Eyebrow>Account Type</Eyebrow>
+        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+          Sets up the app around what you do. It doesn't change what you can access or what you're charged.
+        </p>
+        <div className="mb-3 flex flex-col gap-2">
+          {[
+            { key: "fieldOwner", label: "I own or manage a field", on: isFieldOwner, locked: hasFields, lockedNote: "You have a claimed field, so this stays on." },
+            { key: "organizer", label: "I organize events", on: isOrganizer, locked: false },
+          ].map((r) => (
+            <label key={r.key} className="p-3 flex items-start gap-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, opacity: rolesSaving ? 0.6 : 1 }}>
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={r.on}
+                disabled={rolesSaving || (r.on && r.locked) || (r.on && !(r.key === "fieldOwner" ? isOrganizer : isFieldOwner))}
+                onChange={(e) => changeRole(r.key, e.target.checked)}
+              />
+              <span>
+                <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>{r.label}</span>
+                {r.on && r.locked && <span className="text-[10px] block" style={{ ...body, color: T.ashFaint }}>{r.lockedNote}</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+        {rolesError && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{rolesError}</p>}
+        <div className="mb-3" />
+
+        {showFieldFee && (
+        <>
         <Eyebrow>Fee Model</Eyebrow>
         <button
           onClick={onOpenBilling}
@@ -4743,6 +5118,21 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           </div>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
+        </>
+        )}
+        {isOrganizer && (
+          <>
+            <Eyebrow>Fees</Eyebrow>
+            <div className="w-full mb-3 p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+              <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>
+                {showFieldFee ? "Organizer events: " : ""}3.5% + $1.30 per ticket
+              </span>
+              <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
+                No cap. Comes out of your payout — players pay exactly the price you set.
+              </span>
+            </div>
+          </>
+        )}
         <button
           onClick={onOpenPayouts}
           className="w-full mb-6 p-4 flex items-center justify-between transition-transform duration-100 active:scale-[0.98]"
@@ -4856,7 +5246,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <div className="p-4 mb-4" style={{ background: "rgba(188,51,39,0.08)", border: `1px solid ${T.alert}`, borderRadius: 6 }}>
             <div className="text-[13px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Delete your account?</div>
             <p className="text-[12px] mb-3" style={{ ...body, color: T.ashDim }}>
-              This permanently deletes your owner account. Any fields you've claimed are released back to unclaimed — you or someone else would need to reclaim them. This can't be undone. Enter your password to confirm.
+              This permanently deletes your owner account. Any fields you've claimed are released back to unclaimed — you or someone else would need to reclaim them.{isOrganizer ? " If you have upcoming events, cancel them first — that issues vouchers to anyone who paid." : ""} This can't be undone. Enter your password to confirm.
             </p>
             <input
               value={deletePassword}
@@ -4884,7 +5274,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           </div>
         )}
 
-        <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>Atlas Field Owner</p>
+        <p className="text-[11px] text-center" style={{ ...body, color: T.ashFaint }}>{isOrganizer && !showFieldFee ? "Atlas Event Organizer" : isOrganizer ? "Atlas Field Owner · Event Organizer" : "Atlas Field Owner"}</p>
       </div>
 
       {showLegal && (
@@ -4902,14 +5292,14 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
                   key={t.key}
                   onClick={() => setLegalTab(t.key)}
                   className="px-2 py-2 text-[12px] font-semibold transition-transform duration-100 active:scale-95"
-                  style={{ ...body, color: legalTab === t.key ? T.ash : T.ashFaint, borderBottom: legalTab === t.key ? `2px solid ${T.ash}` : "2px solid transparent" }}
+                  style={{ ...body, color: activeLegal.key === t.key ? T.ash : T.ashFaint, borderBottom: activeLegal.key === t.key ? `2px solid ${T.ash}` : "2px solid transparent" }}
                 >
                   {t.label}
                 </button>
               ))}
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-              <p className="text-[12px] whitespace-pre-wrap" style={{ ...body, color: T.ashDim, lineHeight: 1.6 }}>{LEGAL_TABS.find((t) => t.key === legalTab).text}</p>
+              <p className="text-[12px] whitespace-pre-wrap" style={{ ...body, color: T.ashDim, lineHeight: 1.6 }}>{activeLegal.text}</p>
             </div>
           </div>
         </div>
@@ -5142,6 +5532,43 @@ function ClaimWelcomeScreen({ fieldName, onContinue }) {
 }
 
 /* ---------- App shell ---------- */
+// Shown only to someone who is both a field owner and an organizer, when they
+// start a new event: at one of their own fields (a regular field event), or
+// at another venue (an Atlas Major, venue typed in or copied from the
+// directory). Deliberately a plain choice — whether an own-field event can
+// ALSO run as a Major is a Phase 2 decision.
+function NewEventChoiceScreen({ myFields, onBack, onPickField, onPickVenue }) {
+  return (
+    <div className="h-screen flex flex-col" style={flatBg}>
+      <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+        <button onClick={onBack} className="p-1" aria-label="Back"><ChevronLeft size={22} color={T.ash} /></button>
+        <h1 className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>Where's this event?</h1>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 pb-8 flex flex-col gap-3">
+        {myFields.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => onPickField(f)}
+            className="w-full p-4 text-left transition-transform duration-100 active:scale-[0.98]"
+            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+          >
+            <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>At {f.name}</div>
+            <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>Your field — a regular field event.</div>
+          </button>
+        ))}
+        <button
+          onClick={onPickVenue}
+          className="w-full p-4 text-left transition-transform duration-100 active:scale-[0.98]"
+          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+        >
+          <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>At another venue</div>
+          <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>You'll enter the venue's name and address — or copy it from an Atlas field.</div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { needRefresh, refreshNow } = useSWUpdate();
   // Sets the real, trustworthy height — but not from window.screen.height
@@ -5230,7 +5657,7 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount } = useOwnerAuth();
 
   // App-level, not scoped to any one screen — a real gap in the earlier
   // version: mobile Safari can silently reload a backgrounded tab to free
@@ -5275,19 +5702,55 @@ export default function App() {
   const [activeFieldId, setActiveFieldId] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null); // null = new event
   const [rosterEvent, setRosterEvent] = useState(null);
+  // Venue mode = the event editor in organizer form (typed-in venue, no
+  // claimed field). Only meaningful for NEW events; an existing event's mode
+  // comes from its own isMajor flag (fieldId/isMajor never change after create).
+  const [newEventVenue, setNewEventVenue] = useState(false);
 
   const activeField = myFields.find((f) => f.id === activeFieldId) || allFields.find((f) => f.id === activeFieldId);
   const myFieldIds = myFields.map((f) => f.id);
-  const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds);
-  const { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
-  const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds);
+  // Passing the uid always: organizer events (hostOwnerId == uid) are merged
+  // in with field events. A field-only account simply matches none.
+  const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds, user?.uid);
+  const { createEvent, createMajorEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
+  const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds, user?.uid);
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
 
+  // Role tailoring (UX only — never used for permissions or fees; the server
+  // decides those from field ownership / the event's own hostOwnerId+isMajor).
+  // Field owner = said so, or actually owns a field. Organizer = said so.
+  const hasFields = myFields.length > 0;
+  const isFieldOwner = !!profile?.accountRoles?.fieldOwner || hasFields;
+  const isOrganizer = profile?.accountRoles?.organizer === true;
+  // Still working out whether this account needs the picker (don't flash it
+  // at an existing owner whose fields haven't loaded yet).
+  const rolesUndetermined = !!profile && !profile.accountRoles && (myFieldsLoading || pendingLoading);
+  const needsRolePicker = !!profile && !profile.accountRoles && !hasFields && pendingFields.length === 0 && !myFieldsLoading && !pendingLoading;
+  // Organizer-only accounts don't owe the field-owner agreement. Anyone not
+  // clearly organizer-only keeps the original gate, so existing owners see
+  // exactly what they saw before.
+  const organizerOnly = isOrganizer && !isFieldOwner;
+  const needsFieldTerms = !organizerOnly && profile?.acceptedTermsVersion !== CURRENT_TERMS_VERSION;
+  const needsOrganizerTerms = isOrganizer && profile?.acceptedOrganizerTermsVersion !== ORGANIZER_TERMS_VERSION;
+
   const openField = (fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); };
   const openClaim = () => setOverlay("claim");
-  const openEventEdit = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev || null); setOverlay("eventEdit"); };
-  const openEventOverview = (field, ev) => { setActiveFieldId(field.id); setEditingEvent(ev); setOverlay("eventOverview"); };
+  // `field` is null for organizer (Major) events, which have no claimed field.
+  const openEventEdit = (field, ev) => { setActiveFieldId(field ? field.id : null); setEditingEvent(ev || null); setNewEventVenue(false); setOverlay("eventEdit"); };
+  const openVenueEventEdit = () => { setActiveFieldId(null); setEditingEvent(null); setNewEventVenue(true); setOverlay("eventEdit"); };
+  const openEventOverview = (field, ev) => { setActiveFieldId(field ? field.id : null); setEditingEvent(ev); setOverlay("eventOverview"); };
+  // One entry point for every "create event" button.
+  //  - field owner only → straight into their field (unchanged behavior)
+  //  - organizer only   → venue form
+  //  - organizer who also owns a field → ask which
+  //  - neither yet      → claim a field (unchanged behavior)
+  const startNewEvent = () => {
+    if (isOrganizer && hasFields) setOverlay("newEventChoice");
+    else if (isOrganizer) openVenueEventEdit();
+    else if (hasFields) openEventEdit(myFields[0], null);
+    else openClaim();
+  };
   const openRoster = (ev) => { setRosterEvent(ev); setOverlay("roster"); };
   const openCheckIn = () => setOverlay("checkIn");
   const closeOverlay = () => setOverlay(null);
@@ -5316,8 +5779,14 @@ export default function App() {
     content = <LoginScreen signIn={signIn} signUp={signUp} />;
   } else if (!profile) {
     content = <LoadingScreen />;
-  } else if (profile.acceptedTermsVersion !== CURRENT_TERMS_VERSION) {
-    content = <LegalAgreementScreen onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
+  } else if (rolesUndetermined) {
+    content = <LoadingScreen />;
+  } else if (needsRolePicker) {
+    content = <RoleSelectionScreen onSave={setAccountRoles} onLogout={handleLogout} />;
+  } else if (needsFieldTerms) {
+    content = <LegalAgreementScreen key="field" kind="field" onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
+  } else if (needsOrganizerTerms) {
+    content = <LegalAgreementScreen key="organizer" kind="organizer" onAccept={() => acceptOrganizerTerms(ORGANIZER_TERMS_VERSION)} />;
   } else if (myFields.length > 0 && !profile.comped && !profile.feeModel) {
     // A real gate, not just a Settings entry — once an owner has actually
     // claimed a field (not before; claiming itself always stays open),
@@ -5375,23 +5844,38 @@ export default function App() {
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
       />
     );
-  } else if (overlay === "eventOverview" && activeField && editingEvent) {
+  } else if (overlay === "newEventChoice") {
+    content = (
+      <NewEventChoiceScreen
+        myFields={myFields}
+        onBack={closeOverlay}
+        onPickField={(f) => openEventEdit(f, null)}
+        onPickVenue={openVenueEventEdit}
+      />
+    );
+  } else if (overlay === "eventOverview" && editingEvent && (activeField || editingEvent.isMajor)) {
     content = (
       <EventOverviewScreen
         ev={editingEvent}
         onBack={closeOverlay}
-        onEdit={() => openEventEdit(activeField, editingEvent)}
+        onEdit={() => openEventEdit(editingEvent.isMajor ? null : activeField, editingEvent)}
         onOpenRoster={openRoster}
         allMyEvents={allMyEvents}
       />
     );
-  } else if (overlay === "eventEdit" && activeField) {
+  } else if (overlay === "eventEdit" && (activeField || (editingEvent ? editingEvent.isMajor : newEventVenue))) {
+    const venueMode = editingEvent ? !!editingEvent.isMajor : newEventVenue;
     content = (
       <EventEditScreen
-        field={activeField}
+        key={editingEvent?.id || (venueMode ? "new-venue" : "new-field")}
+        field={venueMode ? null : activeField}
+        venueMode={venueMode}
+        ownerUid={user.uid}
+        payoutsEnabled={!!profile.payoutsEnabled}
         existing={editingEvent}
         onBack={closeOverlay}
         createEvent={createEvent}
+        createMajorEvent={createMajorEvent}
         updateEvent={updateEvent}
         newEventId={newEventId}
         allFields={allFields}
@@ -5420,7 +5904,11 @@ export default function App() {
           myFields={myFields}
           events={allMyEvents}
           eventsLoading={allMyEventsLoading}
-          onNewEvent={(field) => openEventEdit(field, null)}
+          isFieldOwner={isFieldOwner}
+          isOrganizer={isOrganizer}
+          onNewEvent={(field) => (field ? openEventEdit(field, null) : startNewEvent())}
+          onStartNewEvent={startNewEvent}
+          onClaimField={openClaim}
           onEditEvent={openEventEdit}
           onOpenOverview={openEventOverview}
           onOpenRoster={openRoster}
@@ -5451,6 +5939,10 @@ export default function App() {
           updateOwnerName={updateOwnerName}
           changePassword={changePassword}
           deleteAccount={deleteAccount}
+          setAccountRoles={setAccountRoles}
+          isFieldOwner={isFieldOwner}
+          isOrganizer={isOrganizer}
+          hasFields={hasFields}
           onOpenBilling={() => setOverlay("billing")}
           onOpenPayouts={() => setOverlay("payouts")}
           onOpenYearInReview={() => setOverlay("yearInReview")}
@@ -5475,11 +5967,10 @@ export default function App() {
           onOpenBilling={() => setOverlay("billing")}
           onOpenYearInReview={() => setOverlay("yearInReview")}
           onOpenEventsList={() => setActiveTab("events")}
-          onCreateEvent={() => {
-            if (myFields.length > 0) openEventEdit(myFields[0], null);
-            else openClaim();
-          }}
-          onOpenEvent={(ev) => openEventOverview(myFields.find((f) => f.id === ev.fieldId) || myFields[0], ev)}
+          isFieldOwner={isFieldOwner}
+          isOrganizer={isOrganizer}
+          onCreateEvent={startNewEvent}
+          onOpenEvent={(ev) => openEventOverview(ev.isMajor ? null : (myFields.find((f) => f.id === ev.fieldId) || myFields[0]), ev)}
           onLogout={handleLogout}
         />
       );

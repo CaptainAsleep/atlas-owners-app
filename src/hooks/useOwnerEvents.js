@@ -2,17 +2,21 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
-// Every event across this owner's claimed field(s) — if they own more than
-// one field, events from all of them show up together, tagged by field name
-// in the UI so it's still clear which is which.
-export function useOwnerEvents(fieldIds) {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
+// Every event this account runs: events at the owner's claimed field(s) AND
+// Atlas Major events they host elsewhere (hostOwnerId === uid, fieldId null).
+// Two listeners merged by id — the sets never overlap (a Major has no
+// fieldId; a field event has no hostOwnerId). Events from several fields
+// show up together, tagged by field name in the UI.
+export function useOwnerEvents(fieldIds, hostOwnerId) {
+  const [fieldEvents, setFieldEvents] = useState([]);
+  const [hostEvents, setHostEvents] = useState([]);
+  const [fieldLoading, setFieldLoading] = useState(true);
+  const [hostLoading, setHostLoading] = useState(true);
 
   useEffect(() => {
     if (!fieldIds || fieldIds.length === 0) {
-      setEvents([]);
-      setLoading(false);
+      setFieldEvents([]);
+      setFieldLoading(false);
       return;
     }
     // Firestore's "in" filter caps at 10 values — plenty of headroom for
@@ -27,20 +31,42 @@ export function useOwnerEvents(fieldIds) {
     const unsub = onSnapshot(
       query(collection(db, "events"), where("fieldId", "in", fieldIds.slice(0, 10))),
       (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-        setEvents(list);
-        setLoading(false);
+        setFieldEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setFieldLoading(false);
       },
       (err) => {
-        console.error("useOwnerEvents error:", err);
-        setLoading(false);
+        console.error("useOwnerEvents (fields) error:", err);
+        setFieldLoading(false);
       }
     );
     return unsub;
   }, [JSON.stringify(fieldIds)]);
 
-  return { events, eventsLoading: loading };
+  useEffect(() => {
+    if (!hostOwnerId) {
+      setHostEvents([]);
+      setHostLoading(false);
+      return;
+    }
+    // Single equality filter: no composite index, no 10-item cap.
+    const unsub = onSnapshot(
+      query(collection(db, "events"), where("hostOwnerId", "==", hostOwnerId)),
+      (snap) => {
+        setHostEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setHostLoading(false);
+      },
+      (err) => {
+        console.error("useOwnerEvents (host) error:", err);
+        setHostLoading(false);
+      }
+    );
+    return unsub;
+  }, [hostOwnerId]);
+
+  const byId = new Map();
+  [...fieldEvents, ...hostEvents].forEach((e) => byId.set(e.id, e));
+  const events = [...byId.values()].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  return { events, eventsLoading: fieldLoading || hostLoading };
 }
 
 export function useOwnerEventActions() {
@@ -54,6 +80,26 @@ export function useOwnerEventActions() {
   async function createEvent(fieldId, fieldName, data, explicitId) {
     const ref = explicitId ? doc(db, "events", explicitId) : doc(collection(db, "events"));
     await setDoc(ref, { ...data, fieldId, fieldName });
+    return ref.id;
+  }
+
+  // Atlas Major event (organizer hosting at a venue that isn't their claimed
+  // field): no field (fieldId: null), hosted by the account (hostOwnerId),
+  // venue carried inline on the event. fieldName mirrors venueName on purpose
+  // — the player app and ~a dozen display sites already render ev.fieldName
+  // as "where", so a Major shows up correctly without touching them.
+  // firestore.rules requires exactly this shape on create (isMajor +
+  // hostOwnerId == uid + no fieldId + an owners/{uid} account).
+  async function createMajorEvent(ownerUid, data, explicitId) {
+    const ref = explicitId ? doc(db, "events", explicitId) : doc(collection(db, "events"));
+    await setDoc(ref, {
+      ...data,
+      isMajor: true,
+      hostOwnerId: ownerUid,
+      fieldId: null,
+      fieldName: data.venueName,
+      createdAt: serverTimestamp(),
+    });
     return ref.id;
   }
 
@@ -83,12 +129,20 @@ export function useOwnerEventActions() {
   // accidentally publishing a duplicate with the original's old date).
   async function duplicateEvent(original) {
     const { id, interestCount, ...rest } = original;
+    // Field events keep the original behavior. A Major copy additionally drops
+    // per-event state (bookedCount, createdAt) so the duplicate starts clean.
+    if (original.isMajor) {
+      const { bookedCount, createdAt, ...majorRest } = rest;
+      const ref = doc(collection(db, "events"));
+      await setDoc(ref, { ...majorRest, date: "", draft: true, title: `${original.title} (Copy)`, createdAt: serverTimestamp() });
+      return ref.id;
+    }
     const ref = doc(collection(db, "events"));
     await setDoc(ref, { ...rest, date: "", draft: true, title: `${original.title} (Copy)` });
     return ref.id;
   }
 
-  return { createEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId };
+  return { createEvent, createMajorEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId };
 }
 
 // Finds the one just-finished event to show on the Dashboard's
