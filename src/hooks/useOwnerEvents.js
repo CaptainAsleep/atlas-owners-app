@@ -215,7 +215,9 @@ export function useAfterActionCandidate(events) {
     getDocs(collection(db, "events", candidateId, "bookings"))
       .then((snap) => {
         if (cancelled) return;
-        if (snap.empty) {
+        // isTest bookings (internal QR check-in rehearsals) don't count.
+        const realDocs = snap.docs.filter((d) => !d.data().isTest);
+        if (realDocs.length === 0) {
           // Zero reservations - suppress the banner entirely, per
           // Michael, rather than falling back to an older event still
           // inside its own visible window.
@@ -225,7 +227,7 @@ export function useAfterActionCandidate(events) {
         let reservedCount = 0;
         let checkedInCount = 0;
         let revenueCents = 0;
-        snap.docs.forEach((d) => {
+        realDocs.forEach((d) => {
           const b = d.data();
           reservedCount += 1;
           if (b.checkedIn) checkedInCount += 1;

@@ -19,7 +19,11 @@ export function useEventBookings(eventId) {
     const unsub = onSnapshot(
       query(collection(db, "events", eventId, "bookings"), orderBy("bookedAt")),
       (snap) => {
-        setBookings(snap.docs.map((d) => d.data()));
+        // isTest bookings (internal QR check-in rehearsals, created by
+        // scripts/add-test-bookings.mjs) are left out of the roster, its
+        // check-in counts and the After-Action Report. Scanning them still
+        // works: checkInPlayer reads the booking doc directly.
+        setBookings(snap.docs.map((d) => d.data()).filter((b) => !b.isTest));
         setLoading(false);
       },
       (err) => {
@@ -196,6 +200,7 @@ export function useOwnerFinancials(events) {
         results.forEach(({ event, snap }) => {
           snap.docs.forEach((d) => {
             const b = d.data();
+            if (b.isTest) return; // internal test booking, never revenue
             if (!b.paid || typeof b.amountPaidCents !== "number") return;
             const bookingFeeCents = typeof b.bookingFeeCents === "number" ? b.bookingFeeCents : 0;
             out.push({
@@ -266,6 +271,7 @@ export function useOwnerReservationStats(events) {
         bookingResults.forEach(({ event, snap }) => {
           snap.docs.forEach((d) => {
             const b = d.data();
+            if (b.isTest) return; // internal test booking, not a real reservation
             allBookings.push({
               eventId: event.id,
               eventTitle: event.title,
