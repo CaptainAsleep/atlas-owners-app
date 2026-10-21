@@ -90,11 +90,18 @@ export async function fetchAttendeeDetails(eventId, uid) {
   }
 }
 
+// True when a booking has child profiles on it. A parent's child-only
+// booking (guardianPlaying:false, 2026-10-21) with one child has
+// attendeeCount 1 but still has attendeeDetails.
+export function bookingHasChildren(b) {
+  return (b?.attendeeCount || 1) > 1 || b?.guardianPlaying === false;
+}
+
 // uid -> [attendee details], loaded once per set of party bookings (solo
 // bookings have none, so they cost nothing).
 export function useAttendeeDetails(eventId, bookings) {
   const [byUid, setByUid] = useState({});
-  const key = bookings.filter((b) => (b.attendeeCount || 1) > 1).map((b) => b.uid).sort().join(",");
+  const key = bookings.filter(bookingHasChildren).map((b) => b.uid).sort().join(",");
 
   useEffect(() => {
     if (!eventId || !key) {
@@ -121,8 +128,8 @@ export async function checkInPlayer(eventId, uid) {
   }
   const data = snap.data();
   if (data.checkedIn) {
-    const attendees = (data.attendeeCount || 1) > 1 ? await fetchAttendeeDetails(eventId, uid) : [];
-    return { ok: false, reason: "already-checked-in", callsign: data.callsign, attendees };
+    const attendees = bookingHasChildren(data) ? await fetchAttendeeDetails(eventId, uid) : [];
+    return { ok: false, reason: "already-checked-in", callsign: data.callsign, attendees, guardianPlaying: data.guardianPlaying !== false };
   }
   // Both mirrored copies, not just the event's — a booking exists as two
   // documents (one under the event for the owner's roster, one under the
@@ -136,8 +143,10 @@ export async function checkInPlayer(eventId, uid) {
   await batch.commit();
   // Check-in stays booking-level: one scan checks in the whole party. The
   // attendee list is only for display (who just walked in).
-  const attendees = (data.attendeeCount || 1) > 1 ? await fetchAttendeeDetails(eventId, uid) : [];
-  return { ok: true, callsign: data.callsign, attendees };
+  const attendees = bookingHasChildren(data) ? await fetchAttendeeDetails(eventId, uid) : [];
+  // guardianPlaying false = the parent booked only their child(ren); the
+  // booking's callsign is the parent who booked, not a player.
+  return { ok: true, callsign: data.callsign, attendees, guardianPlaying: data.guardianPlaying !== false };
 }
 
 // Parses the exact same "atlas:checkin:{eventId}:{uid}" payload the player

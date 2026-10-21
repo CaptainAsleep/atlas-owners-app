@@ -3233,12 +3233,12 @@ function CheckInScreen({ event, onBack }) {
             const result = await checkInFromScan(decodedText, event.id);
             const partyLines = (result.attendees || []).map((a) => ({
               name: `${a.fullName} · ${a.callsign}`,
-              sub: a.waiverSignatureId ? `Guardian has signed waiver${a.guardianName ? ` — ${a.guardianName}` : ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}` : `Minor — guardian ${a.guardianName || ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}`,
+              sub: guardianLine(a),
             }));
             if (result.ok) {
-              setStatus({ ok: true, message: partyLines.length ? `${result.callsign} + ${partyLines.length} ${partyLines.length === 1 ? "child" : "children"} checked in` : `${result.callsign} checked in`, lines: partyLines });
+              setStatus({ ok: true, message: checkInMessage(result, "checked in"), lines: partyLines });
             } else if (result.reason === "already-checked-in") {
-              setStatus({ ok: false, message: `${result.callsign} already checked in`, lines: partyLines });
+              setStatus({ ok: false, message: checkInMessage(result, "already checked in"), lines: partyLines });
             } else if (result.reason === "wrong-event") {
               setStatus({ ok: false, message: "That code is for a different event" });
             } else if (result.reason === "not-booked") {
@@ -3317,6 +3317,20 @@ function CheckInScreen({ event, onBack }) {
   );
 }
 
+// Check-in result line. A parent's child-only booking (guardianPlaying
+// false) names the kids, with the parent as "booked by".
+function checkInMessage(result, verb) {
+  const kids = (result.attendees || []).map((a) => a.callsign || a.fullName || "Child");
+  if (result.guardianPlaying === false && kids.length) {
+    const names = kids.length === 1 ? kids[0] : `${kids.slice(0, -1).join(", ")} and ${kids[kids.length - 1]}`;
+    return `${names} ${verb} (booked by ${result.callsign}, not playing)`;
+  }
+  return kids.length ? `${result.callsign} + ${kids.length} ${kids.length === 1 ? "child" : "children"} ${verb}` : `${result.callsign} ${verb}`;
+}
+
+const guardianLine = (a) =>
+  `${a.waiverSignatureId ? "Guardian has signed waiver" : "Minor"}${a.guardianPlaying === false ? " · parent not playing" : ""}${a.guardianName ? ` — ${a.guardianName}` : ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}`;
+
 /* ---------- Roster ---------- */
 function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId);
@@ -3390,7 +3404,16 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                 PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
               </span>
             )}
-            {(matchingBooking?.attendeeCount || 1) > 1 && (
+            {matchingBooking?.guardianPlaying === false ? (
+              <>
+                <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: T.rPill }}>
+                  PARENT NOT PLAYING
+                </span>
+                <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
+                  {matchingBooking.attendeeCount || 1} {(matchingBooking.attendeeCount || 1) === 1 ? "CHILD" : "CHILDREN"}
+                </span>
+              </>
+            ) : (matchingBooking?.attendeeCount || 1) > 1 && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
                 PARTY OF {matchingBooking.attendeeCount}
               </span>
@@ -3413,7 +3436,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
               <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
               <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>
-                {a.waiverSignatureId ? "Guardian has signed waiver" : "Minor"}{a.guardianName ? ` — ${a.guardianName}` : ""}{a.guardianPhone ? ` · ${a.guardianPhone}` : ""}
+                {guardianLine(a)}
               </div>
             </div>
           ))}
@@ -3598,11 +3621,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Waiver Signatures.csv`,
-                ["Signed Name", "Signed At", "Waiver Version"],
+                ["Signed Name", "Signed At", "Waiver Version", "Signed For"],
                 signatures.map((s) => [
                   s.signedName,
                   s.signedAt?.toDate ? s.signedAt.toDate().toLocaleString() : "",
                   s.waiverVersion || "",
+                  s.guardianAbsent ? `${s.dependentName || "Child"} (parent not playing acknowledgement)` : s.dependentId ? `${s.dependentName || "Child"} (guardian)` : "Self",
                 ])
               )}
               className="text-[11px] font-semibold transition-transform duration-100 active:scale-95"
@@ -3622,7 +3646,8 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <p className="text-[12px] mb-5" style={{ ...body, color: T.ashFaint }}>No signatures yet.</p>
         ) : (
           <div className="mb-5">
-            {signatures.map((s, i) => renderPersonRow(s.uid || `sig-${i}`, s.signedName, s.signedAt, false, () => setSelectedSignature(s)))}
+            {/* "Parent not playing" acknowledgements are kept in the CSV, not as extra rows here. */}
+            {signatures.filter((s) => !s.guardianAbsent).map((s, i) => renderPersonRow(s.uid || `sig-${i}`, s.signedName, s.signedAt, false, () => setSelectedSignature(s)))}
           </div>
         )}
 
@@ -3765,7 +3790,10 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
   const matches = bookings.filter((b) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return b.callsign.toLowerCase().includes(q) || (nameByUid.get(b.uid) || "").toLowerCase().includes(q);
+    // Child callsigns too — a parent who isn't playing may have dropped the
+    // kids off, and the owner is checking them in by the kid's name.
+    const childCallsigns = Array.isArray(b.attendees) ? b.attendees.filter((a) => a?.kind === "minor").map((a) => (a.callsign || "").toLowerCase()) : [];
+    return b.callsign.toLowerCase().includes(q) || (nameByUid.get(b.uid) || "").toLowerCase().includes(q) || childCallsigns.some((n) => n.includes(q));
   });
 
   const handleCheckIn = async (booking) => {
@@ -3775,8 +3803,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
       const result = await checkInPlayer(event.id, booking.uid);
       if (result.ok) {
         playFeedbackSound(true);
-        const kids = (result.attendees || []).length;
-        setFeedback({ uid: booking.uid, ok: true, message: kids ? `${result.callsign} + ${kids} ${kids === 1 ? "child" : "children"} checked in` : `${result.callsign} checked in` });
+        setFeedback({ uid: booking.uid, ok: true, message: checkInMessage(result, "checked in") });
       } else {
         playFeedbackSound(false);
         setFeedback({ uid: booking.uid, ok: false, message: result.reason === "already-checked-in" ? "Already checked in" : "Couldn't check in — try again" });
@@ -3857,6 +3884,11 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                     </div>
                   )}
                 </div>
+                {b.guardianPlaying === false && Array.isArray(b.attendees) && (
+                  <div className="text-[11px] mt-1" style={{ ...body, color: T.ashDim }}>
+                    For {b.attendees.filter((a) => a?.kind === "minor").map((a) => a.callsign || "Child").join(", ")} · parent not playing
+                  </div>
+                )}
                 {feedback?.uid === b.uid && (
                   <div className="text-[11px] font-medium mt-1" style={{ ...body, color: feedback.ok ? T.good : T.alert }}>{feedback.message}</div>
                 )}
