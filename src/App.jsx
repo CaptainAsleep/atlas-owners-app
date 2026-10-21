@@ -5148,6 +5148,81 @@ function PayoutsScreen({ profile, onBack, checking }) {
   );
 }
 
+// Settings > Feedback (2026-10-21). Player ratings and comments about the
+// owner's field(s), from the post-event feedback emails. Served by the
+// getOwnerFeedback callable, which strips every name/uid/booking id —
+// owners never see who said what, and never see players' Atlas ratings.
+function OwnerFeedbackSection() {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    httpsCallable(functions, "getOwnerFeedback")()
+      .then((r) => { if (alive) setEvents(r.data?.events || []); })
+      .catch((err) => { console.error("getOwnerFeedback failed:", err); if (alive) setError("Couldn't load feedback right now."); });
+    return () => { alive = false; };
+  }, []);
+  const fmtDate = (d) => (d ? new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "");
+  return (
+    <>
+      <Eyebrow>Feedback</Eyebrow>
+      <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+        The day after each event, checked-in players are asked to rate your field. Their ratings and comments show up here, without names.
+      </p>
+      {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+      {!error && events === null && <p className="text-[12px] mb-6" style={{ ...body, color: T.ashFaint }}>Loading…</p>}
+      {events && events.length === 0 && (
+        <div className="w-full mb-6 p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+          <span className="text-[13px] block" style={{ ...body, color: T.ashDim }}>No feedback yet. It'll appear here after your next event.</span>
+        </div>
+      )}
+      {events && events.length > 0 && (
+        <div className="mb-6 flex flex-col gap-2">
+          {events.map((e) => {
+            const isOpen = open === e.eventId;
+            return (
+              <div key={e.eventId} style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <button
+                  onClick={() => setOpen(isOpen ? null : e.eventId)}
+                  className="w-full p-4 flex items-center justify-between text-left transition-transform duration-100 active:scale-[0.98]"
+                >
+                  <span>
+                    <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>{e.eventTitle}</span>
+                    <span className="text-[11px] block mt-0.5" style={{ ...body, color: T.ashFaint }}>
+                      {[e.fieldName, fmtDate(e.eventDate)].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-right">
+                      <span className="text-[15px] font-semibold block" style={{ ...display, color: T.accent }}>{e.average.toFixed(1)} ★</span>
+                      <span className="text-[10px] block" style={{ ...body, color: T.ashFaint }}>{e.responses} {e.responses === 1 ? "rating" : "ratings"}</span>
+                    </span>
+                    <ChevronRight size={15} color={T.ashFaint} style={{ transform: isOpen ? "rotate(90deg)" : "none" }} />
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-4 flex flex-col gap-2">
+                    {e.comments.length === 0 && (
+                      <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>Ratings only — no written comments for this event.</p>
+                    )}
+                    {e.comments.map((cm, i) => (
+                      <div key={i} className="p-3" style={{ background: T.void, borderRadius: T.rTight }}>
+                        <span className="text-[11px] font-semibold block mb-1" style={{ ...display, color: T.accent }}>{"★".repeat(cm.rating)}<span style={{ color: T.line }}>{"★".repeat(5 - cm.rating)}</span></span>
+                        <span className="text-[13px] block" style={{ ...body, color: T.ash, whiteSpace: "pre-wrap" }}>{cm.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, setAccountRoles, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onLogout }) {
   // Organizer-only accounts have no field fee model to show.
   const showFieldFee = isFieldOwner || !isOrganizer;
@@ -5369,6 +5444,8 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Year in Review</span>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
+
+        {hasFields && <OwnerFeedbackSection />}
 
         <Eyebrow>Security</Eyebrow>
         <button
