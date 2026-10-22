@@ -120,7 +120,10 @@ export function useAttendeeDetails(eventId, bookings) {
   return byUid;
 }
 
-export async function checkInPlayer(eventId, uid) {
+// method: how the check-in happened — "qr" (scan) or "name" (manual
+// list). Recorded on both docs for the Admin portal's check-in method
+// stats; "code" check-ins go through the checkInByCode Cloud Function.
+export async function checkInPlayer(eventId, uid, method = "name") {
   const bookingRef = doc(db, "events", eventId, "bookings", uid);
   const snap = await getDoc(bookingRef);
   if (!snap.exists()) {
@@ -138,8 +141,9 @@ export async function checkInPlayer(eventId, uid) {
   // this was a real bug: check-in-based patches could never fire, since
   // the copy they check never learned a check-in happened at all.
   const batch = writeBatch(db);
-  batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp() });
-  batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp() });
+  const checkInMethod = method === "qr" ? "qr" : "name";
+  batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod });
+  batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod });
   await batch.commit();
   // Check-in stays booking-level: one scan checks in the whole party. The
   // attendee list is only for display (who just walked in).
@@ -164,7 +168,7 @@ export async function checkInFromScan(rawText, eventId) {
   if (scannedEventId !== eventId) {
     return { ok: false, reason: "wrong-event" };
   }
-  return checkInPlayer(eventId, uid);
+  return checkInPlayer(eventId, uid, "qr");
 }
 
 

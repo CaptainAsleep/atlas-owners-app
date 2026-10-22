@@ -3781,6 +3781,44 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
   const [query, setQuery] = useState("");
   const [busyUid, setBusyUid] = useState(null);
   const [feedback, setFeedback] = useState(null); // { uid, ok, message }
+  // Check-in code (2026-10-22): the player — or a dropped-off child — reads
+  // out the 8-character code from their confirmation. Looked up server-side
+  // (checkInByCode), shown for the owner to confirm, then checked in.
+  const [codeInput, setCodeInput] = useState("");
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeResult, setCodeResult] = useState(null); // checkInByCode response
+  const [codeMessage, setCodeMessage] = useState(null); // { ok, text }
+  const runCode = async (confirm) => {
+    setCodeBusy(true);
+    setCodeMessage(null);
+    try {
+      const call = httpsCallable(functions, "checkInByCode");
+      const { data } = await call({ eventId: event.id, code: codeInput, confirm });
+      if (data.ok && data.preview) {
+        setCodeResult(data);
+      } else if (data.ok) {
+        playFeedbackSound(true);
+        setCodeResult(null);
+        setCodeInput("");
+        setCodeMessage({ ok: true, text: checkInMessage(data, "checked in") });
+      } else {
+        playFeedbackSound(false);
+        setCodeResult(data.reason === "already-checked-in" ? data : null);
+        setCodeMessage({
+          ok: false,
+          text: data.reason === "bad-format" ? "Codes are 8 letters and numbers, like K7MP-Q3XR."
+            : data.reason === "already-checked-in" ? checkInMessage(data, "already checked in")
+            : "No booking for this event has that code.",
+        });
+      }
+    } catch (err) {
+      console.error("checkInByCode failed:", err);
+      playFeedbackSound(false);
+      setCodeMessage({ ok: false, text: "Couldn't check that code — try again." });
+    } finally {
+      setCodeBusy(false);
+    }
+  };
 
   const signedUids = new Set(signatures.map((s) => s.uid).filter(Boolean));
   const nameByUid = new Map(signatures.filter((s) => s.uid).map((s) => [s.uid, s.signedName]));
@@ -3800,7 +3838,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
     setBusyUid(booking.uid);
     setFeedback(null);
     try {
-      const result = await checkInPlayer(event.id, booking.uid);
+      const result = await checkInPlayer(event.id, booking.uid, "name");
       if (result.ok) {
         playFeedbackSound(true);
         setFeedback({ uid: booking.uid, ok: true, message: checkInMessage(result, "checked in") });
@@ -3831,13 +3869,74 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
         </div>
 
         <div className="px-5 pt-3">
+          <div className="mb-3 p-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+            <div className="text-[10px] font-semibold uppercase mb-1.5" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.06em" }}>Check-in code</div>
+            <form
+              onSubmit={(e) => { e.preventDefault(); if (codeInput.trim() && !codeBusy) runCode(false); }}
+              className="flex gap-2"
+            >
+              <input
+                value={codeInput}
+                onChange={(e) => { setCodeInput(e.target.value.toUpperCase()); setCodeResult(null); setCodeMessage(null); }}
+                placeholder="K7MP-Q3XR"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={12}
+                className="flex-1 min-w-0 px-3 py-2.5 text-[15px] bg-transparent outline-none"
+                style={{ ...mono, letterSpacing: "0.08em", background: T.void, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash, boxSizing: "border-box" }}
+              />
+              <button
+                type="submit"
+                disabled={codeBusy || !codeInput.trim()}
+                className="px-4 py-2 text-[12px] font-semibold transition-transform duration-100 active:scale-95"
+                style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, opacity: codeBusy || !codeInput.trim() ? 0.6 : 1 }}
+              >
+                {codeBusy && !codeResult ? "…" : "Find"}
+              </button>
+            </form>
+            {codeResult && (
+              <div className="mt-2.5 pt-2.5" style={{ borderTop: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-[14px] font-medium" style={{ ...body, color: T.ash }}>{codeResult.signedName || codeResult.callsign}</div>
+                  {codeResult.signedName && <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{codeResult.callsign}</div>}
+                  {codeResult.guardianPlaying === false && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.alert, border: `1px solid ${T.alert}`, borderRadius: T.rPill }}>PARENT NOT PLAYING</span>
+                  )}
+                </div>
+                {codeResult.waiverSigned !== null && (
+                  <div className="text-[11px] mt-0.5" style={{ ...body, color: codeResult.waiverSigned ? T.good : T.alert }}>
+                    {codeResult.waiverSigned ? "✓ Waiver signed" : "⚠ No waiver signature found"}
+                  </div>
+                )}
+                {(codeResult.attendees || []).map((a) => (
+                  <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
+                    <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
+                    <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>{guardianLine(a)}</div>
+                  </div>
+                ))}
+                {codeResult.ok && codeResult.preview && (
+                  <button
+                    onClick={() => runCode(true)}
+                    disabled={codeBusy}
+                    className="mt-2.5 w-full py-2.5 text-[12px] font-semibold transition-transform duration-100 active:scale-95"
+                    style={{ ...display, background: T.good, color: "#FFFFFF", borderRadius: T.rPill, opacity: codeBusy ? 0.6 : 1 }}
+                  >
+                    {codeBusy ? "…" : (codeResult.attendees || []).length ? `Check In Party (${(codeResult.guardianPlaying === false ? 0 : 1) + codeResult.attendees.length})` : "Check In"}
+                  </button>
+                )}
+              </div>
+            )}
+            {codeMessage && (
+              <div className="text-[11px] font-medium mt-2" style={{ ...body, color: codeMessage.ok ? T.good : T.alert }}>{codeMessage.text}</div>
+            )}
+          </div>
           <div className="relative mb-3">
             <Search size={15} color={T.ashFaint} className="absolute left-3 top-1/2" style={{ transform: "translateY(-50%)" }} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search reserved players by name"
-              autoFocus
+              placeholder="Or search reserved players by name"
               className="w-full pl-9 pr-3 py-2.5 text-[13px] bg-transparent outline-none"
               style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash, boxSizing: "border-box" }}
             />
