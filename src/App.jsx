@@ -386,13 +386,14 @@ function PrimaryButton({ children, onClick, disabled, tone = "ash" }) {
 }
 
 /* ---------- Auth ---------- */
-function LoginScreen({ signIn, signUp }) {
-  const [mode, setMode] = useState("signin");
+function LoginScreen({ signIn, signUp, sendPasswordReset }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "reset"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetSentTo, setResetSentTo] = useState("");
 
   const friendlyError = (code) => {
     if (code === "auth/email-already-in-use") return "That email already has an account — try signing in instead.";
@@ -406,6 +407,21 @@ function LoginScreen({ signIn, signUp }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    if (mode === "reset") {
+      const addr = email.trim();
+      if (!addr) { setError("Enter the email you use for Atlas."); return; }
+      setBusy(true);
+      try {
+        // Same message whether or not an account exists (server never says).
+        await sendPasswordReset(addr);
+        setResetSentTo(addr);
+      } catch (err) {
+        setError(friendlyError(err.code));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
       if (mode === "signup") {
@@ -429,12 +445,52 @@ function LoginScreen({ signIn, signUp }) {
         <span className="text-lg font-semibold" style={{ ...display, color: T.ash, letterSpacing: "0.1em" }}>ATLAS FOR HOSTS</span>
       </div>
 
+      {mode === "reset" && (
+        <>
+          <h1 className="text-[21px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Reset your password</h1>
+          {!resetSentTo && (
+            <p className="text-[13px] leading-relaxed mb-5" style={{ ...body, color: T.ashDim }}>
+              Enter the email you use for Atlas and we'll send you a link to choose a new password.
+            </p>
+          )}
+        </>
+      )}
+      {mode === "reset" && resetSentTo ? (
+        <div className="p-4 flex flex-col gap-2" style={{ background: "#FFFFFF", borderRadius: 12, boxShadow: T.shadowMd }}>
+          <p className="text-[15px] font-semibold" style={{ ...display, color: T.ash }}>Check your email</p>
+          <p className="text-[13px] leading-relaxed" style={{ ...body, color: T.ashDim }}>
+            If an Atlas account exists for <span style={{ color: T.ash, fontWeight: 600 }}>{resetSentTo}</span>, a link to reset your password is on its way. It expires in one hour. Check your spam folder if it doesn't show up in a minute or two.
+          </p>
+          <button
+            type="button"
+            onClick={() => setResetSentTo("")}
+            className="self-start text-[12px] font-medium mt-1"
+            style={{ ...body, color: T.accent }}
+          >
+            Didn't get it? Send again
+          </button>
+        </div>
+      ) : (
       <form onSubmit={handleSubmit}>
         {mode === "signup" && (
           <TextField label="Your Name" value={name} onChange={setName} placeholder="Full name" />
         )}
         <TextField label="Email" value={email} onChange={setEmail} placeholder="you@yourfield.com" type="email" />
-        <TextField label="Password" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+        {mode !== "reset" && (
+          <TextField label="Password" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+        )}
+        {mode === "signin" && (
+          <div className="flex justify-end -mt-1 mb-2">
+            <button
+              type="button"
+              onClick={() => { setMode("reset"); setError(""); setResetSentTo(""); }}
+              className="text-[12px] font-medium"
+              style={{ ...body, color: T.accent }}
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
         {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
         <button
           type="submit"
@@ -442,16 +498,17 @@ function LoginScreen({ signIn, signUp }) {
           className="w-full py-3.5 font-semibold text-[14px] flex items-center justify-center gap-2 mt-2 transition-transform duration-100 active:scale-[0.98]"
           style={{ ...display, background: T.ash, color: "#FFFFFF", borderRadius: T.rPill, boxShadow: T.shadowMd, opacity: busy ? 0.6 : 1 }}
         >
-          {busy ? "Please wait…" : mode === "signup" ? "Create Account" : "Sign In"} <ArrowRight size={16} />
+          {busy ? "Please wait…" : mode === "signup" ? "Create Account" : mode === "reset" ? "Send Reset Link" : "Sign In"} <ArrowRight size={16} />
         </button>
       </form>
+      )}
 
       <button
-        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); }}
+        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setResetSentTo(""); }}
         className="text-center text-[13px] mt-4 transition-transform duration-100 active:scale-95"
         style={{ ...body, color: T.accent }}
       >
-        {mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+        {mode === "reset" ? "Back to sign in" : mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
       </button>
     </div>
   );
@@ -6082,7 +6139,7 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, sendPasswordReset, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount } = useOwnerAuth();
 
   // App-level, not scoped to any one screen — a real gap in the earlier
   // version: mobile Safari can silently reload a backgrounded tab to free
@@ -6201,7 +6258,7 @@ export default function App() {
   let showNav = false;
 
   if (!user) {
-    content = <LoginScreen signIn={signIn} signUp={signUp} />;
+    content = <LoginScreen signIn={signIn} signUp={signUp} sendPasswordReset={sendPasswordReset} />;
   } else if (!profile) {
     content = <LoadingScreen />;
   } else if (rolesUndetermined) {

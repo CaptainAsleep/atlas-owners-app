@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   updateProfile,
@@ -11,7 +12,8 @@ import {
   deleteUser,
 } from "firebase/auth";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
-import { auth, db } from "../lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../lib/firebase";
 
 export function useOwnerAuth() {
   const [user, setUser] = useState(null);
@@ -65,6 +67,31 @@ export function useOwnerAuth() {
 
   async function signIn(email, password) {
     await signInWithEmailAndPassword(auth, email, password);
+  }
+
+  // "Forgot password?" on the login screen. Signed-out by design. Atlas-
+  // branded via the sendPasswordReset Cloud Function (Resend, link to
+  // airsoftatlas.app/reset-password.html); if the function is unreachable,
+  // falls back to Firebase's own default reset email so the person still
+  // gets a link. Never reveals whether an account exists — resolves the
+  // same way for unknown emails; only a malformed address throws.
+  async function sendPasswordReset(email) {
+    try {
+      await httpsCallable(functions, "sendPasswordReset")({ email, app: "owner" });
+    } catch (err) {
+      if (err?.code === "functions/invalid-argument") {
+        const e = new Error(err.message);
+        e.code = "auth/invalid-email";
+        throw e;
+      }
+      console.warn("sendPasswordReset failed, using Firebase's default email:", err?.code || err);
+      try {
+        await sendPasswordResetEmail(auth, email, { url: "https://ownerapp.airsoftatlas.app/" });
+      } catch (err2) {
+        if (err2?.code === "auth/user-not-found" || err2?.code === "auth/too-many-requests") return;
+        throw err2;
+      }
+    }
   }
 
   async function signOut() {
@@ -157,5 +184,5 @@ export function useOwnerAuth() {
     await deleteUser(auth.currentUser);
   }
 
-  return { user, profile, authLoading, signUp, signIn, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount };
+  return { user, profile, authLoading, signUp, signIn, sendPasswordReset, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount };
 }
