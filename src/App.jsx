@@ -1694,9 +1694,21 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents, pr
       // rental selection against server-side — the free-text `price` stays
       // exactly as typed for display/editing (e.g. "$30"), parsed the same
       // way priceOptionsChoices' price already is on events.
+      // quantity = stock per event (blank = unlimited); maxPerPerson = how
+      // many one player can rent (default 1). Both enforced server-side in
+      // createBookingCheckout (2026-10-24).
       const cleanRentals = rentals
         .filter((r) => r.name.trim())
-        .map((r) => ({ ...r, priceCents: Math.round((parsePrice(r.price) || 0) * 100) }));
+        .map((r) => {
+          const stock = parseInt(r.quantity, 10);
+          const perPerson = parseInt(r.maxPerPerson, 10);
+          return {
+            ...r,
+            priceCents: Math.round((parsePrice(r.price) || 0) * 100),
+            quantity: Number.isInteger(stock) && stock >= 0 ? stock : null,
+            maxPerPerson: Number.isInteger(perPerson) && perPerson >= 1 ? Math.min(perPerson, 50) : 1,
+          };
+        });
       const combinedCity = state.trim() ? `${city.trim()}, ${state.trim()}` : city.trim();
       const minAgeNum = parseInt(minimumAge, 10);
       const cleanMinAge = Number.isInteger(minAgeNum) && minAgeNum > 0 && minAgeNum <= 99 ? minAgeNum : null;
@@ -1908,6 +1920,18 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents, pr
               className="w-full mb-2 px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
             <input value={r.availability} onChange={(e) => updateRental(i, "availability", e.target.value)} placeholder="Availability note"
               className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+            <div className="flex gap-2 mt-2">
+              <label className="flex-1 min-w-0">
+                <span className="text-[9px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Stock per event</span>
+                <input value={r.quantity ?? ""} onChange={(e) => updateRental(i, "quantity", e.target.value.replace(/[^0-9]/g, ""))} placeholder="Unlimited" inputMode="numeric"
+                  className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              </label>
+              <label className="flex-1 min-w-0">
+                <span className="text-[9px] font-semibold uppercase block mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.04em" }}>Max per person</span>
+                <input value={r.maxPerPerson ?? ""} onChange={(e) => updateRental(i, "maxPerPerson", e.target.value.replace(/[^0-9]/g, ""))} placeholder="1" inputMode="numeric"
+                  className="w-full px-2.5 py-2 text-[12px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+              </label>
+            </div>
           </div>
         ))}
 
@@ -2038,7 +2062,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
     const rentalCounts = {};
     aarBookings.forEach((b) => {
       (b.selectedRentals || []).forEach((r) => {
-        rentalCounts[r.name] = (rentalCounts[r.name] || 0) + 1;
+        rentalCounts[r.name] = (rentalCounts[r.name] || 0) + (Number.isInteger(r.qty) && r.qty > 0 ? r.qty : 1);
       });
     });
     const choiceCounts = {};
@@ -3608,7 +3632,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
     ? (typeof confirmGrant.booking.entryPriceCents === "number"
         ? confirmGrant.booking.entryPriceCents * Math.max(1, confirmGrant.booking.attendeeCount || 1)
         : Math.max(0, confirmGrant.booking.amountPaidCents
-            - (confirmGrant.booking.selectedRentals || []).reduce((s, r) => s + (typeof r.priceCents === "number" ? r.priceCents : 0), 0)
+            - (confirmGrant.booking.selectedRentals || []).reduce((s, r) => s + (typeof r.priceCents === "number" ? r.priceCents * (Number.isInteger(r.qty) && r.qty > 0 ? r.qty : 1) : 0), 0)
             - (profile?.feeModel !== "absorb" && !event.isMajor ? (confirmGrant.booking.bookingFeeCents || 0) : 0)))
     : 0;
 
@@ -3684,7 +3708,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             )}
             {matchingBooking?.selectedRentals?.length > 0 && (
               <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>
-                Rented: {matchingBooking.selectedRentals.map((r) => r.name).join(", ")}
+                Rented: {matchingBooking.selectedRentals.map((r) => (r.qty > 1 ? `${r.qty}× ${r.name}` : r.name)).join(", ")}
               </span>
             )}
           </div>
@@ -3792,7 +3816,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                   b.callsign,
                   b.selectedChoiceLabel || "",
                   ...(event.selectionGroups || []).map((g) => (b.selections || []).find((x) => x.groupId === g.id)?.choiceLabel || ""),
-                  (b.selectedRentals || []).map((r) => r.name).join(", "),
+                  (b.selectedRentals || []).map((r) => (r.qty > 1 ? `${r.qty}x ${r.name}` : r.name)).join(", "),
                   b.bookedAt?.toDate ? b.bookedAt.toDate().toLocaleString() : "",
                   b.checkedIn ? "Yes" : "No",
                   b.checkedInAt?.toDate ? b.checkedInAt.toDate().toLocaleString() : "",
