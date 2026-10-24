@@ -12,6 +12,7 @@ import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from ".
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useAttendeeDetails, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
+import { useVoucherGifts, searchPlayersForGift, giftFreeEntry, dateInputFromToday, endOfLocalDayMs, formatShortDate, giftErrorMessage, GIFT_MONTHLY_CAP } from "./hooks/useVoucherGifts";
 import { db, storage, functions } from "./lib/firebase";
 import { httpsCallable } from "firebase/functions";
 import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
@@ -1281,7 +1282,195 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
   );
 }
 
-function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) {
+/* ---------- Gifted free-entry vouchers (2026-10-24) ---------- */
+// Lives at the top of a field's manage page: how many gifts are left this
+// month, the button to give one, and this month's gifts with their status.
+function FreeEntryGiftsCard({ field, profile }) {
+  const { gifts, giftsLoading, remaining } = useVoucherGifts(field.id);
+  const [open, setOpen] = useState(false);
+  const [toast, setToast] = useState("");
+
+  return (
+    <div className="mb-5">
+      <Eyebrow>Free Entry Vouchers</Eyebrow>
+      <div className="p-4" style={{ background: T.panel, borderRadius: 12, boxShadow: T.shadowMd }}>
+        <p className="text-[13px] mb-3" style={{ ...body, color: T.ashDim }}>
+          Give any Atlas player one free entry to any event here, whatever the ticket price. You pick when it expires.
+        </p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[12px] font-semibold" style={{ ...mono, color: remaining > 0 ? T.ash : T.alert }}>
+            {giftsLoading ? "…" : `${remaining} of ${GIFT_MONTHLY_CAP} left this month`}
+          </div>
+          <button
+            onClick={() => { setToast(""); setOpen(true); }}
+            disabled={giftsLoading || remaining <= 0}
+            className="px-4 py-2 text-[12px] font-semibold flex items-center gap-1.5 transition-transform duration-100 active:scale-95"
+            style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: giftsLoading || remaining <= 0 ? 0.5 : 1 }}
+          >
+            <Ticket size={13} /> Gift a Free Entry
+          </button>
+        </div>
+        {toast && <p className="text-[12px] mt-3" style={{ ...body, color: T.good }}>{toast}</p>}
+        {gifts.length > 0 && (
+          <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${T.line}` }}>
+            {gifts.map((g) => (
+              <div key={g.id} className="py-1.5 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium truncate" style={{ ...body, color: T.ash }}>{g.callsign || "Player"}</div>
+                  <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>
+                    Given {formatShortDate(g.giftedAt)} · expires {formatShortDate(g.expiresAt)}
+                  </div>
+                </div>
+                <span
+                  className="text-[9px] font-semibold px-1.5 py-0.5 flex-shrink-0"
+                  style={{ ...mono, color: g.redeemedAt ? T.good : T.ashDim, border: `1px solid ${g.redeemedAt ? T.good : T.line}`, borderRadius: T.rPill }}
+                  title={g.redeemedEventTitle || undefined}
+                >
+                  {g.redeemedAt ? "USED" : "NOT USED YET"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {open && (
+        <GiftFreeEntryModal
+          field={field}
+          profile={profile}
+          onClose={() => setOpen(false)}
+          onGifted={(callsign) => { setOpen(false); setToast(`Free entry sent to ${callsign}.`); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function GiftFreeEntryModal({ field, profile, onClose, onGifted }) {
+  const [queryText, setQueryText] = useState("");
+  const [results, setResults] = useState(null); // null = not searched yet
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState(null);
+  const [expiresOn, setExpiresOn] = useState(() => dateInputFromToday(profile?.voucherExpirationDays || 365));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const runSearch = async (e) => {
+    e?.preventDefault();
+    const q = queryText.trim();
+    if (q.length < 2) { setError("Type at least 2 characters of a callsign, or a full email."); return; }
+    setError("");
+    setSearching(true);
+    try {
+      setResults(await searchPlayersForGift(field.id, q));
+    } catch (err) {
+      console.error("searchPlayersForGift failed:", err);
+      setError(giftErrorMessage(err, "Search didn't work — try again."));
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleGift = async () => {
+    if (!picked) return;
+    const expiresAtMs = endOfLocalDayMs(expiresOn);
+    if (!expiresAtMs) { setError("Pick an expiration date after today."); return; }
+    setError("");
+    setBusy(true);
+    try {
+      await giftFreeEntry({ fieldId: field.id, uid: picked.uid, expiresAtMs, note });
+      onGifted(picked.callsign);
+    } catch (err) {
+      console.error("giftFreeEntryVoucher failed:", err);
+      setError(giftErrorMessage(err, "Couldn't send that free entry — try again, or reach out on Discord if it keeps happening."));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => !busy && onClose()}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full p-5 overflow-y-auto" style={{ background: T.panel, borderRadius: 8, maxWidth: 360, maxHeight: "85vh" }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[15px] font-semibold" style={{ ...display, color: T.ash }}>Gift a free entry</div>
+          <button onClick={onClose} disabled={busy} className="w-8 h-8 -mr-2 flex items-center justify-center"><X size={18} color={T.ashDim} /></button>
+        </div>
+        <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>
+          Good for one person at any one event at {field.name}, at any ticket price.
+        </p>
+
+        {!picked ? (
+          <>
+            <form onSubmit={runSearch} className="flex gap-2 mb-3">
+              <input
+                value={queryText}
+                onChange={(e) => setQueryText(e.target.value)}
+                placeholder="Callsign or email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="flex-1 min-w-0 px-3 py-2.5 text-[14px] outline-none"
+                style={{ ...body, background: T.panel, border: `1px solid ${T.line}`, borderRadius: 6, color: T.ash }}
+              />
+              <button type="submit" disabled={searching} className="px-3 flex items-center justify-center" style={{ background: T.ash, borderRadius: 6, opacity: searching ? 0.6 : 1 }} aria-label="Search">
+                <Search size={16} color="#FFFFFF" />
+              </button>
+            </form>
+            {searching && <p className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>Searching…</p>}
+            {results && !searching && results.length === 0 && (
+              <p className="text-[12px] mb-2" style={{ ...body, color: T.ashFaint }}>
+                No Atlas player found. Callsigns match from the start; emails have to be exact. They need an Atlas account first.
+              </p>
+            )}
+            {results && results.map((r) => (
+              <button
+                key={r.uid}
+                onClick={() => { setPicked(r); setError(""); }}
+                className="w-full mb-2 p-2.5 flex items-center gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
+                style={{ border: `1px solid ${T.line}`, borderRadius: 8, background: T.panel }}
+              >
+                <div className="w-9 h-9 flex-shrink-0 overflow-hidden flex items-center justify-center" style={{ borderRadius: 999, background: T.tint }}>
+                  {r.avatarUrl ? <img src={r.avatarUrl} alt="" className="w-full h-full" style={{ objectFit: "cover" }} /> : <Users size={16} color={T.ashFaint} />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold truncate" style={{ ...body, color: T.ash }}>{r.callsign}</div>
+                  {r.teamName && <div className="text-[11px] truncate" style={{ ...body, color: T.ashFaint }}>{r.teamName}</div>}
+                </div>
+              </button>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="mb-4 p-2.5 flex items-center justify-between gap-3" style={{ background: T.tint, borderRadius: 8 }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 flex-shrink-0 overflow-hidden flex items-center justify-center" style={{ borderRadius: 999, background: T.panel }}>
+                  {picked.avatarUrl ? <img src={picked.avatarUrl} alt="" className="w-full h-full" style={{ objectFit: "cover" }} /> : <Users size={16} color={T.ashFaint} />}
+                </div>
+                <div className="text-[13px] font-semibold truncate" style={{ ...body, color: T.ash }}>{picked.callsign}</div>
+              </div>
+              <button onClick={() => setPicked(null)} disabled={busy} className="text-[12px] font-medium flex-shrink-0" style={{ ...body, color: T.accent }}>Change</button>
+            </div>
+            <TextField label="Expires on" type="date" value={expiresOn} onChange={setExpiresOn} />
+            <TextField label="Note (optional)" value={note} onChange={(v) => setNote(v.slice(0, 140))} placeholder="Thanks for helping set up!" />
+          </>
+        )}
+
+        {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+
+        {picked && (
+          <div className="flex gap-2 mt-1">
+            <button onClick={onClose} disabled={busy} className="flex-1 py-2.5 text-[13px] font-medium transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+              Cancel
+            </button>
+            <button onClick={handleGift} disabled={busy} className="flex-1 py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "Sending…" : "Send Free Entry"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents, profile }) {
   const [imageUrl, setImageUrl] = useState(field.imageUrl || null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
@@ -1554,6 +1743,7 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents }) 
       </div>
 
       <div className="px-6 pt-4">
+        <FreeEntryGiftsCard field={field} profile={profile} />
         <Eyebrow>Field Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -3400,6 +3590,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   const [confirmGrant, setConfirmGrant] = useState(null); // { uid, name, booking }
   const [grantBusy, setGrantBusy] = useState(false);
   const [grantError, setGrantError] = useState("");
+  // Owner picks the expiry when giving a voucher (2026-10-24); pre-filled
+  // from their saved default (Cancel Event's "expire after N days").
+  const [grantExpiresOn, setGrantExpiresOn] = useState("");
+  useEffect(() => {
+    if (confirmGrant) setGrantExpiresOn(dateInputFromToday(profile?.voucherExpirationDays || 365));
+  }, [confirmGrant]);
   const [selectedSignature, setSelectedSignature] = useState(null);
 
   // Display-only preview — the real amount is computed server-side in
@@ -3418,11 +3614,13 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
 
   const handleConfirmGrant = async () => {
     if (!confirmGrant) return;
+    const expiresAtMs = endOfLocalDayMs(grantExpiresOn);
+    if (!expiresAtMs) { setGrantError("Pick an expiration date after today."); return; }
     setGrantBusy(true);
     setGrantError("");
     try {
       const grantVoucher = httpsCallable(functions, "grantVoucherToPlayer");
-      await grantVoucher({ eventId: event.id, uid: confirmGrant.uid });
+      await grantVoucher({ eventId: event.id, uid: confirmGrant.uid, expiresAtMs });
       setConfirmGrant(null);
     } catch (err) {
       console.error("grantVoucherToPlayer failed:", err);
@@ -3457,8 +3655,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               </span>
             )}
             {matchingBooking?.paid && (
-              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.accent, border: `1px solid ${T.accent}`, borderRadius: T.rPill }}>
-                PAID{typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}
+              <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: matchingBooking.freeEntry ? T.good : T.accent, border: `1px solid ${matchingBooking.freeEntry ? T.good : T.accent}`, borderRadius: T.rPill }}>
+                {matchingBooking.freeEntry
+                  ? "FREE ENTRY"
+                  : matchingBooking.paidByVoucher
+                    ? "PAID · VOUCHER"
+                    : `PAID${typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}`}
               </span>
             )}
             {matchingBooking?.guardianPlaying === false ? (
@@ -3746,6 +3948,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
               This frees their spot on "{event.title}" and issues them a ${(previewGrantAmountCents / 100).toFixed(2)} voucher, good for a future event at this field — instead of a refund.
             </p>
+            <TextField label="Voucher expires on" type="date" value={grantExpiresOn} onChange={setGrantExpiresOn} />
             {grantError && (
               <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{grantError}</p>
             )}
@@ -6324,6 +6527,7 @@ export default function App() {
         onBack={() => setOverlay("field")}
         updateFieldProfile={updateFieldProfile}
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
+        profile={profile}
       />
     );
   } else if (overlay === "newEventChoice") {
