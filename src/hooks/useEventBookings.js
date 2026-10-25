@@ -162,6 +162,9 @@ export async function checkInPlayer(eventId, uid, method = "name") {
 export async function checkInFromScan(rawText, eventId) {
   const parts = (rawText || "").split(":");
   if (parts.length !== 4 || parts[0] !== "atlas" || parts[1] !== "checkin") {
+    // A player's Refer a Friend QR (Profile → Invite Friends) is an app
+    // link with ?ref=<uid> — easy to show by mistake at the gate.
+    if (/[?&]ref=[^&\s]+/.test(rawText || "")) return { ok: false, reason: "referral-code" };
     return { ok: false, reason: "not-atlas-code" };
   }
   const [, , scannedEventId, uid] = parts;

@@ -3436,29 +3436,39 @@ function venueFromField(f) {
 }
 
 // Generated tones, not an audio file — no asset to bundle or host, and it
-// works identically everywhere. A single clean tone for success, two quick
-// low ones for a miss — standard "good/bad" sound-design convention.
-function playFeedbackSound(success) {
+// works identically everywhere. Three cues (2026-10-25, owner request):
+//   "success" — one clean 880 Hz tone (unchanged; owners like it)
+//   "error"   — two harsh square-wave buzzes. Was two 220 Hz sine beeps,
+//               which phone speakers barely reproduce — likely why owners
+//               didn't notice an error sound existed.
+//   "already" — a neutral "bonk" (triangle, quick pitch drop): gets
+//               attention without sounding like a failure.
+// Legacy booleans still work: true = success, false = error.
+function playFeedbackSound(kind) {
+  const cue = kind === true ? "success" : kind === false ? "error" : kind;
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const beep = (freq, startTime, duration) => {
+    const beep = (freq, startTime, duration, type = "sine", peak = 0.3, endFreq = null) => {
       const oscillator = ctx.createOscillator();
       const gainNode = ctx.createGain();
       oscillator.connect(gainNode);
       gainNode.connect(ctx.destination);
-      oscillator.type = "sine";
-      oscillator.frequency.value = freq;
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(freq, startTime);
+      if (endFreq) oscillator.frequency.exponentialRampToValueAtTime(endFreq, startTime + duration);
       gainNode.gain.setValueAtTime(0.001, startTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.3, startTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(peak, startTime + 0.01);
       gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
       oscillator.start(startTime);
       oscillator.stop(startTime + duration);
     };
-    if (success) {
+    if (cue === "success") {
       beep(880, ctx.currentTime, 0.18);
+    } else if (cue === "already") {
+      beep(520, ctx.currentTime, 0.22, "triangle", 0.45, 260);
     } else {
-      beep(220, ctx.currentTime, 0.12);
-      beep(220, ctx.currentTime + 0.16, 0.12);
+      beep(330, ctx.currentTime, 0.14, "square", 0.16);
+      beep(330, ctx.currentTime + 0.2, 0.14, "square", 0.16);
     }
   } catch (err) {
     // Audio unavailable for some reason — visual feedback still carries
@@ -3506,10 +3516,13 @@ function CheckInScreen({ event, onBack }) {
               name: `${a.fullName} · ${a.callsign}`,
               sub: guardianLine(a),
             }));
+            const cue = result.ok ? "success" : result.reason === "already-checked-in" ? "already" : "error";
             if (result.ok) {
               setStatus({ ok: true, message: checkInMessage(result, "checked in"), lines: partyLines });
             } else if (result.reason === "already-checked-in") {
-              setStatus({ ok: false, message: checkInMessage(result, "already checked in"), lines: partyLines });
+              setStatus({ ok: false, neutral: true, message: alreadyCheckedInMessage(result), lines: partyLines });
+            } else if (result.reason === "referral-code") {
+              setStatus({ ok: false, message: "That's a referral code. Ask for their check-in QR." });
             } else if (result.reason === "wrong-event") {
               setStatus({ ok: false, message: "That code is for a different event" });
             } else if (result.reason === "not-booked") {
@@ -3523,9 +3536,9 @@ function CheckInScreen({ event, onBack }) {
             // implemented the Vibration API), but it's a real, distinct
             // buzz on Android. Sound and the flash below are what this
             // actually depends on.
-            playFeedbackSound(result.ok);
-            setFlash(result.ok ? "good" : "alert");
-            if (navigator.vibrate) navigator.vibrate(result.ok ? 120 : [80, 80, 80]);
+            playFeedbackSound(cue);
+            setFlash(cue === "success" ? "good" : cue === "already" ? "neutral" : "alert");
+            if (navigator.vibrate) navigator.vibrate(cue === "success" ? 120 : cue === "already" ? 250 : [80, 80, 80]);
             // Camera stays open the whole time — no need to close it just to
             // show this. Brief pause before the next scan can register, so
             // the same code held in frame doesn't fire repeatedly.
@@ -3555,7 +3568,7 @@ function CheckInScreen({ event, onBack }) {
       {flash && (
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: flash === "good" ? "rgba(15,122,82,0.35)" : "rgba(188,51,39,0.35)", zIndex: 50, transition: "opacity 0.5s ease-out" }}
+          style={{ background: flash === "good" ? "rgba(15,122,82,0.35)" : flash === "neutral" ? "rgba(214,160,30,0.35)" : "rgba(188,51,39,0.35)", zIndex: 50, transition: "opacity 0.5s ease-out" }}
         />
       )}
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ background: T.panel, borderBottom: `1px solid ${T.line}` }}>
@@ -3570,7 +3583,7 @@ function CheckInScreen({ event, onBack }) {
       <div className="px-6 py-4" style={{ background: T.panel, borderTop: `1px solid ${T.line}` }}>
         {status ? (
           <div className="py-3 text-center">
-            <div className="font-semibold text-[14px]" style={{ ...display, color: status.ok ? T.good : T.alert }}>{status.message}</div>
+            <div className="font-semibold text-[14px]" style={{ ...display, color: status.ok ? T.good : status.neutral ? T.ash : T.alert }}>{status.message}</div>
             {status.lines?.map((l, i) => (
               <div key={i} className="mt-2">
                 <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{l.name}</div>
@@ -3597,6 +3610,20 @@ function checkInMessage(result, verb) {
     return `${names} ${verb} (booked by ${result.callsign}, not playing)`;
   }
   return kids.length ? `${result.callsign} + ${kids.length} ${kids.length === 1 ? "child" : "children"} ${verb}` : `${result.callsign} ${verb}`;
+}
+
+// "Player already checked in: Ghost" / "Party already checked in: Ghost +
+// 2 children" (2026-10-25). Party = more than one person on the booking.
+function alreadyCheckedInMessage(result) {
+  const kids = (result.attendees || []).map((a) => a.callsign || a.fullName || "Child");
+  const headcount = kids.length + (result.guardianPlaying === false ? 0 : 1);
+  let who;
+  if (result.guardianPlaying === false && kids.length) {
+    who = `${kids.length === 1 ? kids[0] : `${kids.slice(0, -1).join(", ")} and ${kids[kids.length - 1]}`} (booked by ${result.callsign})`;
+  } else {
+    who = kids.length ? `${result.callsign} + ${kids.length} ${kids.length === 1 ? "child" : "children"}` : result.callsign;
+  }
+  return `${headcount > 1 ? "Party" : "Player"} already checked in${who ? `: ${who}` : ""}`;
 }
 
 const guardianLine = (a) =>
@@ -4086,12 +4113,13 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
         setCodeInput("");
         setCodeMessage({ ok: true, text: checkInMessage(data, "checked in") });
       } else {
-        playFeedbackSound(false);
+        playFeedbackSound(data.reason === "already-checked-in" ? "already" : "error");
         setCodeResult(data.reason === "already-checked-in" ? data : null);
         setCodeMessage({
           ok: false,
+          neutral: data.reason === "already-checked-in",
           text: data.reason === "bad-format" ? "Codes are 8 letters and numbers, like K7MP-Q3XR."
-            : data.reason === "already-checked-in" ? checkInMessage(data, "already checked in")
+            : data.reason === "already-checked-in" ? alreadyCheckedInMessage(data)
             : "No booking for this event has that code.",
         });
       }
@@ -4127,8 +4155,8 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
         playFeedbackSound(true);
         setFeedback({ uid: booking.uid, ok: true, message: checkInMessage(result, "checked in") });
       } else {
-        playFeedbackSound(false);
-        setFeedback({ uid: booking.uid, ok: false, message: result.reason === "already-checked-in" ? "Already checked in" : "Couldn't check in — try again" });
+        playFeedbackSound(result.reason === "already-checked-in" ? "already" : "error");
+        setFeedback({ uid: booking.uid, ok: false, neutral: result.reason === "already-checked-in", message: result.reason === "already-checked-in" ? alreadyCheckedInMessage(result) : "Couldn't check in — try again" });
       }
     } catch (err) {
       console.error("manual check-in failed:", err);
@@ -4212,7 +4240,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
               </div>
             )}
             {codeMessage && (
-              <div className="text-[11px] font-medium mt-2" style={{ ...body, color: codeMessage.ok ? T.good : T.alert }}>{codeMessage.text}</div>
+              <div className="text-[11px] font-medium mt-2" style={{ ...body, color: codeMessage.ok ? T.good : codeMessage.neutral ? T.ash : T.alert }}>{codeMessage.text}</div>
             )}
           </div>
           <div className="relative mb-3">
@@ -4273,7 +4301,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                   </div>
                 )}
                 {feedback?.uid === b.uid && (
-                  <div className="text-[11px] font-medium mt-1" style={{ ...body, color: feedback.ok ? T.good : T.alert }}>{feedback.message}</div>
+                  <div className="text-[11px] font-medium mt-1" style={{ ...body, color: feedback.ok ? T.good : feedback.neutral ? T.ash : T.alert }}>{feedback.message}</div>
                 )}
               </div>
             ))
