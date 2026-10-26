@@ -11,7 +11,7 @@ import {
   updatePassword,
   deleteUser,
 } from "firebase/auth";
-import { collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 
@@ -33,10 +33,16 @@ export function useOwnerAuth() {
       setProfile(null);
       return;
     }
-    const unsub = onSnapshot(doc(db, "owners", user.uid), (snap) => {
+    // includeMetadataChanges + the fromCache check (2026-10-25): a cache-only
+    // "doc missing" snapshot (fired when the device can't reach Firestore
+    // yet) is not a real answer, so it's ignored and the loader keeps
+    // showing. Same fix as the player app's profile listener, after an
+    // established player got sent through new-account setup by exactly
+    // that snapshot. The backfill below is also create-only now.
+    const unsub = onSnapshot(doc(db, "owners", user.uid), { includeMetadataChanges: true }, (snap) => {
       if (snap.exists()) {
         setProfile(snap.data());
-      } else {
+      } else if (!snap.metadata.fromCache) {
         // Self-healing backfill, same pattern used for player profiles —
         // an owner account can end up here if it ever signed in without
         // going through the normal signUp doc-creation step (e.g. the
@@ -44,10 +50,14 @@ export function useOwnerAuth() {
         // from another app). Creates a real doc with sensible defaults
         // instead of leaving every future save broken.
         const fallbackName = user.displayName || user.email?.split("@")[0] || "Owner";
-        setDoc(doc(db, "owners", user.uid), {
-          email: user.email,
-          name: fallbackName,
-          createdAt: serverTimestamp(),
+        const ownerRef = doc(db, "owners", user.uid);
+        runTransaction(db, async (tx) => {
+          if ((await tx.get(ownerRef)).exists()) return; // never overwrite a real owner doc
+          tx.set(ownerRef, {
+            email: user.email,
+            name: fallbackName,
+            createdAt: serverTimestamp(),
+          });
         }).catch((err) => console.error("owner doc backfill failed:", err));
       }
     });
