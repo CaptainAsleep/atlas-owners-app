@@ -10,7 +10,7 @@ import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA, ORGANIZER_TE
 import { useMyStaffGrants, useFieldStaff, inviteStaff, resendStaffInvite, removeStaff, cancelStaffInvite, acceptStaffAgreement, runAcceptStaffInvites, staffErrorMessage, STAFF_CAP } from "./hooks/useStaff";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from "./hooks/useOwnerEvents";
-import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
+import { useEventWaivers, useRecentActivity, usePublicCallsigns } from "./hooks/useEventWaivers";
 import { useEventBookings, useAttendeeDetails, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { useVoucherGifts, searchPlayersForGift, giftFreeEntry, dateInputFromToday, endOfLocalDayMs, formatShortDate, giftErrorMessage, GIFT_MONTHLY_CAP } from "./hooks/useVoucherGifts";
@@ -4187,6 +4187,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
   };
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const attendeeDetails = useAttendeeDetails(event.id, bookings);
+  // Callsign fallback for anyone who signed the waiver but has no booking
+  // (a booking stores its own callsign; a signature doesn't).
+  const publicCallsigns = usePublicCallsigns(
+    signatures.filter((s) => s.uid && !bookings.some((b) => b.uid === s.uid)).map((s) => s.uid)
+  );
+  const callsignFor = (uid) => bookings.find((b) => b.uid === uid)?.callsign || publicCallsigns[uid] || "";
   const bannedUids = new Set(banned.map((b) => b.uid));
   const [showManualCheckIn, setShowManualCheckIn] = useState(false);
   const [rosterFilter, setRosterFilter] = useState("all"); // all | checkedIn | notYet
@@ -4247,7 +4253,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
     // two different versions of this function.
     const matchingSignature = signatures.find((s) => s.uid === uid);
     const matchingBooking = bookings.find((b) => b.uid === uid);
-    const secondaryName = [matchingSignature?.signedName, matchingBooking?.callsign].find((n) => n && n !== name);
+    const secondaryName = [matchingSignature?.signedName, callsignFor(uid)].find((n) => n && n !== name);
     return (
       <div key={uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${isBanned ? T.alert : T.line}` }}>
         <div>
@@ -4490,9 +4496,10 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Waiver Signatures.csv`,
-                ["Signed Name", "Signed At", "Waiver Version", "Signed For"],
+                ["Signed Name", "Callsign", "Signed At", "Waiver Version", "Signed For"],
                 signatures.map((s) => [
                   s.signedName,
+                  callsignFor(s.uid),
                   s.signedAt?.toDate ? s.signedAt.toDate().toLocaleString() : "",
                   s.waiverVersion || "",
                   s.guardianAbsent ? `${s.dependentName || "Child"} (parent not playing acknowledgement)` : s.dependentId ? `${s.dependentName || "Child"} (guardian)` : "Self",

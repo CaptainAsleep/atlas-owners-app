@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 // Real data: everyone who has actually signed the waiver for this event.
@@ -107,4 +107,38 @@ export function useRecentActivity(fieldIds, hostOwnerId) {
     totalSignatures: list.length,
     activityLoading: fieldLoading || hostLoading,
   };
+}
+
+// Current callsign for each uid, read from publicProfiles (public-read by
+// design: callsign/avatar/team only, never real name or email). Fills the
+// gap for anyone who signed the waiver without booking — their booking
+// doc is the only other place a callsign lives, so waiver-only signers
+// used to show a real name with no callsign under it (2026-10-27, The
+// Compound). Only fetches uids it hasn't already looked up.
+export function usePublicCallsigns(uids) {
+  const [callsigns, setCallsigns] = useState({});
+  const key = [...new Set((uids || []).filter(Boolean))].sort().join(",");
+
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    const missing = key.split(",").filter((uid) => !(uid in callsigns));
+    if (missing.length === 0) return;
+    Promise.all(
+      missing.map((uid) =>
+        getDoc(doc(db, "publicProfiles", uid))
+          .then((snap) => [uid, snap.exists() ? snap.data().callsign || null : null])
+          .catch((err) => {
+            console.error("usePublicCallsigns error:", err);
+            return [uid, null];
+          })
+      )
+    ).then((pairs) => {
+      if (cancelled) return;
+      setCallsigns((prev) => ({ ...prev, ...Object.fromEntries(pairs) }));
+    });
+    return () => { cancelled = true; };
+  }, [key]);
+
+  return callsigns;
 }
