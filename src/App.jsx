@@ -13,9 +13,10 @@ import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
 import { useEventBookings, useAttendeeDetails, useEventInterestedCount, useOwnerFinancials, useOwnerReservationStats, checkInFromScan, checkInPlayer } from "./hooks/useEventBookings";
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { useVoucherGifts, searchPlayersForGift, giftFreeEntry, dateInputFromToday, endOfLocalDayMs, formatShortDate, giftErrorMessage, GIFT_MONTHLY_CAP } from "./hooks/useVoucherGifts";
-import { db, storage, functions } from "./lib/firebase";
+import { db, storage, functions, auth } from "./lib/firebase";
+import { FIELD_RULE_TYPES, MAX_ACTIVE_FIELD_PATCHES, describeRules, loadFieldCheckins, loadHolders, patchProgressRows } from "./patchProgress";
 import { httpsCallable } from "firebase/functions";
-import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 
 /* ---------- design tokens — same palette as the player app for immediate
@@ -254,7 +255,8 @@ function fieldCompletenessGaps(field) {
 
 // Same client-side resize used throughout the player app — shrink before
 // upload so nobody's waiting on a 12MB phone photo.
-function resizeImageFile(file, maxSize = 800, quality = 0.85) {
+// mimeType param added 2026-10-27 (field patch art is PNG, for transparency).
+function resizeImageFile(file, maxSize = 800, quality = 0.85, mimeType = "image/jpeg") {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Couldn't read that file."));
@@ -274,7 +276,7 @@ function resizeImageFile(file, maxSize = 800, quality = 0.85) {
         canvas.width = width;
         canvas.height = height;
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))), "image/jpeg", quality);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))), mimeType, quality);
       };
       img.src = e.target.result;
     };
@@ -1470,7 +1472,527 @@ function GiftFreeEntryModal({ field, profile, onClose, onGifted }) {
   );
 }
 
-function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents, profile }) {
+// ── Field patches (2026-10-27) ──────────────────────────────────────────────
+// Owner-built unlockable patches for this field: create (art + name + 1–2
+// rule templates, OR'd), see how close players are, hand one out manually to
+// anyone who has checked in here, edit rules, retire. Stored at
+// fields/{fieldId}/fieldPatches; players' apps unlock them on their own
+// (retroactively — past check-ins count). Name and art can't be changed after
+// creation (players who have it keep the original) — retire and add a new one.
+const FIELD_PATCH_NAME_MAX = 40;
+const FIELD_PATCH_DETAILS_MAX = 200;
+
+function blankRule(type = "checkins") {
+  return { type, count: 10, eventType: "TOURNAMENT", hour: 20, keywords: "", start: "", end: "" };
+}
+
+// UI rule -> stored rule: only the keys that type uses (the Firestore rules
+// reject unknown keys), numbers as integers.
+function cleanRule(r) {
+  const out = { type: r.type, count: Math.round(Number(r.count)) };
+  if (r.type === "event_type") out.eventType = r.eventType;
+  if (r.type === "night") out.hour = Math.round(Number(r.hour));
+  if (r.type === "keywords") out.keywords = String(r.keywords || "").split(",").map((k) => k.trim()).filter(Boolean).slice(0, 5);
+  if (r.type === "date_range") { out.start = r.start; out.end = r.end; }
+  return out;
+}
+
+function ruleToForm(r) {
+  return { ...blankRule(r.type), ...r, keywords: (r.keywords || []).join(", ") };
+}
+
+function ruleError(r) {
+  const n = Number(r.count);
+  if (!Number.isInteger(n) || n < 1 || n > 100) return "The number has to be a whole number from 1 to 100.";
+  if (r.type === "keywords" && cleanRule(r).keywords.length === 0) return "Add at least one title keyword.";
+  if (r.type === "date_range") {
+    if (!r.start || !r.end) return "Pick both dates.";
+    if (r.end < r.start) return "The end date is before the start date.";
+    if ((new Date(r.end) - new Date(r.start)) / 86400000 > 366) return "Keep the date range to a year or less.";
+  }
+  return null;
+}
+
+function RuleEditor({ rule, onChange }) {
+  const inputStyle = { ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash };
+  const set = (k, v) => onChange({ ...rule, [k]: v });
+  return (
+    <div className="flex flex-col gap-2">
+      <select value={rule.type} onChange={(e) => onChange({ ...blankRule(e.target.value), count: rule.count })}
+        className="w-full px-3 py-2 text-[13px] outline-none" style={inputStyle}>
+        {FIELD_RULE_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+      </select>
+      <div className="flex items-center gap-2">
+        <span className="text-[12px]" style={{ ...body, color: T.ashDim }}>N =</span>
+        <input type="number" min={1} max={100} value={rule.count} onChange={(e) => set("count", e.target.value)}
+          className="w-20 px-3 py-2 text-[13px] outline-none" style={inputStyle} />
+        {rule.type === "event_type" && (
+          <select value={rule.eventType} onChange={(e) => set("eventType", e.target.value)} className="flex-1 px-3 py-2 text-[13px] outline-none" style={inputStyle}>
+            {GAME_TYPES.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+          </select>
+        )}
+        {rule.type === "night" && (
+          <select value={rule.hour} onChange={(e) => set("hour", e.target.value)} className="flex-1 px-3 py-2 text-[13px] outline-none" style={inputStyle}>
+            {[16, 17, 18, 19, 20, 21, 22].map((h) => <option key={h} value={h}>starting {h - 12} PM or later</option>)}
+          </select>
+        )}
+      </div>
+      {rule.type === "keywords" && (
+        <input value={rule.keywords} onChange={(e) => set("keywords", e.target.value)} placeholder="Title keywords, comma-separated (e.g. halloween, zombie)"
+          className="w-full px-3 py-2 text-[13px] outline-none" style={inputStyle} />
+      )}
+      {rule.type === "date_range" && (
+        <div className="flex gap-2">
+          <input type="date" value={rule.start} onChange={(e) => set("start", e.target.value)} className="flex-1 px-3 py-2 text-[13px] outline-none" style={inputStyle} />
+          <input type="date" value={rule.end} onChange={(e) => set("end", e.target.value)} className="flex-1 px-3 py-2 text-[13px] outline-none" style={inputStyle} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Rules form shared by create and "edit rules". value = { manual, rules: [r] or [r, r] }.
+function RulesForm({ value, onChange }) {
+  const { manual, rules } = value;
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex items-center gap-2 text-[12px]" style={{ ...body, color: T.ashDim }}>
+        <input type="checkbox" checked={manual} onChange={(e) => onChange({ ...value, manual: e.target.checked })} />
+        Manual only (no automatic unlock — you give it out yourself)
+      </label>
+      {!manual && (
+        <>
+          <RuleEditor rule={rules[0]} onChange={(r) => onChange({ ...value, rules: [r, ...rules.slice(1)] })} />
+          {rules.length > 1 ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.08em" }}>or</span>
+                <button onClick={() => onChange({ ...value, rules: [rules[0]] })} className="text-[12px]" style={{ ...body, color: T.alert }}>Remove</button>
+              </div>
+              <RuleEditor rule={rules[1]} onChange={(r) => onChange({ ...value, rules: [rules[0], r] })} />
+            </>
+          ) : (
+            <button onClick={() => onChange({ ...value, rules: [rules[0], blankRule("event_streak")] })} className="text-[12px] font-medium text-left" style={{ ...body, color: T.accent }}>
+              + Add an "or" rule
+            </button>
+          )}
+        </>
+      )}
+      <p className="text-[12px] p-2" style={{ ...body, color: T.ash, background: T.panelAlt, borderRadius: 6 }}>
+        {describeRules(manual ? [] : rules.map(cleanRule), GAME_TYPES)}
+      </p>
+    </div>
+  );
+}
+
+function FieldPatchesCard({ field, events }) {
+  const [patches, setPatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [catalogNames, setCatalogNames] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState(null);
+  const [editRules, setEditRules] = useState(null); // { manual, rules } while editing the expanded patch
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const [players, setPlayers] = useState(null); // loadFieldCheckins result, loaded on demand
+  const [holders, setHolders] = useState(null);
+  const [picked, setPicked] = useState(new Set());
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "fields", field.id, "fieldPatches"),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.active === a.active ? (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0) : a.active ? -1 : 1));
+        setPatches(list);
+        setLoading(false);
+      },
+      (err) => { console.error("fieldPatches:", err); setLoading(false); }
+    );
+    getDocs(collection(db, "achievementPatches"))
+      .then((s) => setCatalogNames(s.docs.map((d) => (d.data().name || "").trim().toLowerCase())))
+      .catch(() => {});
+    return unsub;
+  }, [field.id]);
+
+  useEffect(() => () => { if (form?.preview) URL.revokeObjectURL(form.preview); }, [form?.preview]);
+
+  const activeCount = patches.filter((p) => p.active !== false).length;
+  const expanded = patches.find((p) => p.id === expandedId) || null;
+  const inputStyle = { ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash };
+
+  const startCreate = () => {
+    setError(""); setToast(""); setExpandedId(null);
+    setForm({ name: "", details: "", blob: null, preview: null, rules: { manual: false, rules: [blankRule()] } });
+    setCreating(true);
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const blob = await resizeImageFile(file, 512, 1, "image/png");
+      setForm((f) => ({ ...f, blob, preview: URL.createObjectURL(blob) }));
+    } catch (err) {
+      setError(err.message || "Couldn't read that image.");
+    }
+  };
+
+  const rulesFromForm = (v) => (v.manual ? [] : v.rules.map(cleanRule));
+  const formRulesError = (v) => (v.manual ? null : v.rules.map(ruleError).find(Boolean) || null);
+
+  const handleCreate = async () => {
+    const name = form.name.trim();
+    if (!form.blob) return setError("Pick an image for the patch.");
+    if (!name) return setError("Give the patch a name.");
+    if (catalogNames.includes(name.toLowerCase())) return setError(`"${name}" is already an Atlas patch name. Pick a different name.`);
+    if (patches.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) return setError("This field already has a patch with that name.");
+    const rErr = formRulesError(form.rules);
+    if (rErr) return setError(rErr);
+    if (activeCount >= MAX_ACTIVE_FIELD_PATCHES) return setError(`You can have up to ${MAX_ACTIVE_FIELD_PATCHES} active patches. Retire one first.`);
+    setBusy(true); setError("");
+    try {
+      const patchRef = doc(collection(db, "fields", field.id, "fieldPatches"));
+      const sRef = ref(storage, `fieldPatches/${field.id}/${patchRef.id}.png`);
+      await uploadBytes(sRef, form.blob, { contentType: "image/png" });
+      const imageUrl = await getDownloadURL(sRef);
+      await setDoc(patchRef, {
+        name,
+        imageUrl,
+        details: form.details.trim().slice(0, FIELD_PATCH_DETAILS_MAX) || null,
+        rules: rulesFromForm(form.rules),
+        active: true,
+        grantDocId: `field-${field.id}-${patchRef.id}`,
+        createdBy: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setCreating(false);
+      setForm(null);
+      setToast(form.rules.manual
+        ? `${name} created. Open it to give it out.`
+        : `${name} is live. Players who already qualify will unlock it the next time they open Atlas.`);
+    } catch (err) {
+      console.error("create field patch:", err);
+      setError("Couldn't create the patch — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const expand = async (p) => {
+    setError(""); setToast(""); setEditRules(null); setPicked(new Set()); setHolders(null);
+    if (expandedId === p.id) { setExpandedId(null); return; }
+    setExpandedId(p.id);
+    setCreating(false);
+    try {
+      const pl = players || await loadFieldCheckins(field.id, events);
+      if (!players) setPlayers(pl);
+      setHolders(await loadHolders(p.grantDocId, Object.keys(pl)));
+    } catch (err) {
+      console.error("load progress:", err);
+      setError("Couldn't load player progress — try again.");
+    }
+  };
+
+  const saveRules = async () => {
+    const rErr = formRulesError(editRules);
+    if (rErr) return setError(rErr);
+    setBusy(true); setError("");
+    try {
+      await updateDoc(doc(db, "fields", field.id, "fieldPatches", expanded.id), { rules: rulesFromForm(editRules), updatedAt: serverTimestamp() });
+      setEditRules(null);
+      setToast("Rules saved. Making a rule easier unlocks it for anyone who now qualifies; making it harder never takes it away.");
+    } catch (err) {
+      console.error("save rules:", err);
+      setError("Couldn't save the rules — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setActive = async (active) => {
+    if (active && activeCount >= MAX_ACTIVE_FIELD_PATCHES) return setError(`You can have up to ${MAX_ACTIVE_FIELD_PATCHES} active patches. Retire one first.`);
+    if (!active && !window.confirm(`Retire ${expanded.name}? It stops unlocking and can't be given out. Players who have it keep it.`)) return;
+    setBusy(true); setError("");
+    try {
+      await updateDoc(doc(db, "fields", field.id, "fieldPatches", expanded.id), { active, updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error("retire:", err);
+      setError("Couldn't update the patch — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const give = async () => {
+    if (picked.size === 0) return;
+    setBusy(true); setError("");
+    let granted = 0; let failed = 0;
+    await Promise.all([...picked].map(async (uid) => {
+      try {
+        await setDoc(doc(db, "users", uid, "patches", expanded.grantDocId), {
+          name: expanded.name,
+          imageUrl: expanded.imageUrl,
+          details: expanded.details || null,
+          addedAt: serverTimestamp(),
+          granted: true,
+          seen: false,
+          fieldId: field.id,
+          fieldPatchId: expanded.id,
+          grantedBy: auth.currentUser.uid,
+          proofEventId: players[uid].proofEventId,
+        });
+        granted += 1;
+      } catch (err) {
+        console.error("give field patch:", uid, err);
+        failed += 1;
+      }
+    }));
+    setBusy(false);
+    setPicked(new Set());
+    setHolders(await loadHolders(expanded.grantDocId, Object.keys(players)).catch(() => holders));
+    setToast(`Given to ${granted} ${granted === 1 ? "player" : "players"}${failed ? ` · ${failed} failed` : ""}.`);
+  };
+
+  const rows = expanded && players && holders ? patchProgressRows(expanded, field.id, events, players, holders) : null;
+  const manualRows = expanded && players && holders && (expanded.rules || []).length === 0
+    ? Object.values(players).filter((p) => !holders.has(p.uid)).map((p) => ({ uid: p.uid, callsign: p.callsign, paths: [] })).sort((a, b) => a.callsign.localeCompare(b.callsign))
+    : null;
+  const listRows = manualRows || rows;
+
+  return (
+    <div className="mb-5">
+      <Eyebrow>Unlockable Patches</Eyebrow>
+      <div className="p-4" style={{ background: T.panel, borderRadius: 12, boxShadow: T.shadowMd }}>
+        <p className="text-[13px] mb-3" style={{ ...body, color: T.ashDim }}>
+          Make your own patches and set what it takes to earn them. Players unlock them automatically (past games count), and you can also hand them out to anyone who has played here.
+        </p>
+        {loading ? (
+          <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>Loading…</p>
+        ) : (
+          <div className="flex flex-col">
+            {patches.map((p) => (
+              <div key={p.id} style={{ borderTop: `1px solid ${T.line}` }}>
+                <button onClick={() => expand(p)} className="w-full py-2 flex items-center gap-3 text-left">
+                  <img src={p.imageUrl} alt="" className="w-10 h-10 flex-shrink-0" style={{ objectFit: "contain", opacity: p.active === false ? 0.4 : 1 }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold truncate" style={{ ...display, color: T.ash }}>{p.name}</div>
+                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{describeRules(p.rules, GAME_TYPES)}</div>
+                  </div>
+                  {p.active === false && <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>RETIRED</span>}
+                  <ChevronRight size={14} color={T.ashFaint} style={{ transform: expandedId === p.id ? "rotate(90deg)" : "none" }} />
+                </button>
+                {expandedId === p.id && (
+                  <div className="pb-3">
+                    {p.details && <p className="text-[12px] mb-2" style={{ ...body, color: T.ashDim }}>{p.details}</p>}
+                    {editRules ? (
+                      <>
+                        <RulesForm value={editRules} onChange={setEditRules} />
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => setEditRules(null)} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>Cancel</button>
+                          <button onClick={saveRules} disabled={busy} className="flex-1 py-2 text-[12px] font-semibold" style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: busy ? 0.6 : 1 }}>Save rules</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex gap-3 mb-2">
+                        {p.active !== false && (
+                          <button onClick={() => setEditRules({ manual: (p.rules || []).length === 0, rules: (p.rules || []).length ? p.rules.map(ruleToForm) : [blankRule()] })}
+                            className="text-[12px] font-medium" style={{ ...body, color: T.accent }}>Edit rules</button>
+                        )}
+                        <button onClick={() => setActive(p.active === false)} disabled={busy} className="text-[12px] font-medium" style={{ ...body, color: p.active === false ? T.accent : T.alert }}>
+                          {p.active === false ? "Reactivate" : "Retire"}
+                        </button>
+                      </div>
+                    )}
+
+                    {!editRules && (
+                      listRows === null ? (
+                        <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>Loading players who've played here…</p>
+                      ) : listRows.length === 0 ? (
+                        <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>
+                          {Object.keys(players || {}).length === 0 ? "Nobody has checked in at your events yet." : "Everyone who has played here already has it."}
+                        </p>
+                      ) : (
+                        <>
+                          <div className="text-[11px] mb-1" style={{ ...body, color: T.ashFaint }}>
+                            {manualRows ? "Players who've played here" : "Closest to unlocking"} · {holders.size} already {holders.size === 1 ? "has" : "have"} it
+                          </div>
+                          <div className="flex flex-col max-h-80 overflow-y-auto">
+                            {listRows.map((r) => (
+                              <label key={r.uid} className="py-2 flex items-start gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
+                                {p.active !== false && (
+                                  <input type="checkbox" className="mt-1" checked={picked.has(r.uid)} onChange={() => setPicked((s) => { const n = new Set(s); if (n.has(r.uid)) n.delete(r.uid); else n.add(r.uid); return n; })} />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[13px] font-medium truncate" style={{ ...body, color: T.ash }}>{r.callsign}</div>
+                                  {r.paths.map((x, i) => (
+                                    <div key={i} className="mt-1">
+                                      <div className="flex justify-between text-[11px]" style={body}>
+                                        <span style={{ color: T.ashDim }}>{i > 0 ? "or " : ""}{x.current} of {x.target} {x.label}</span>
+                                        <span style={{ ...mono, color: T.ashFaint }}>{x.remaining} to go</span>
+                                      </div>
+                                      <div className="h-1 w-full mt-0.5" style={{ background: T.panelAlt, borderRadius: 999 }}>
+                                        <div className="h-full" style={{ width: `${Math.round((x.current / Math.max(1, x.target)) * 100)}%`, background: T.accent, borderRadius: 999 }} />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                          {p.active !== false && (
+                            <button onClick={give} disabled={busy || picked.size === 0} className="w-full mt-2 py-2 text-[12px] font-semibold"
+                              style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: busy || picked.size === 0 ? 0.5 : 1 }}>
+                              {busy ? "Giving…" : picked.size ? `Give ${p.name} to ${picked.size}` : "Select players to give it to"}
+                            </button>
+                          )}
+                        </>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!creating ? (
+          <button onClick={startCreate} disabled={loading} className="mt-3 px-4 py-2 text-[12px] font-semibold flex items-center gap-1.5 transition-transform duration-100 active:scale-95"
+            style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill }}>
+            <Plus size={13} /> Create a patch
+          </button>
+        ) : (
+          <div className="mt-3 pt-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${T.line}` }}>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            <button onClick={() => fileRef.current?.click()} className="flex items-center gap-3 p-2" style={{ border: `1px dashed ${T.line}`, borderRadius: 8 }}>
+              {form.preview ? <img src={form.preview} alt="" className="w-14 h-14" style={{ objectFit: "contain" }} />
+                : <div className="w-14 h-14 flex items-center justify-center" style={{ background: T.panelAlt, borderRadius: 8 }}><Plus size={18} color={T.ashFaint} /></div>}
+              <span className="text-[12px] text-left" style={{ ...body, color: T.ashDim }}>{form.preview ? "Change image" : "Choose patch image (a PNG with a transparent background looks best)"}</span>
+            </button>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.slice(0, FIELD_PATCH_NAME_MAX) })} placeholder="Patch name"
+              className="w-full px-3 py-2 text-[13px] outline-none" style={inputStyle} />
+            <textarea value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value.slice(0, FIELD_PATCH_DETAILS_MAX) })} rows={2}
+              placeholder="Description players see (optional)" className="w-full px-3 py-2 text-[13px] outline-none resize-none" style={inputStyle} />
+            <RulesForm value={form.rules} onChange={(rules) => setForm({ ...form, rules })} />
+            <p className="text-[11px]" style={{ ...body, color: T.ashFaint }}>Name and image can't be changed after you create it.</p>
+            <div className="flex gap-2">
+              <button onClick={() => { setCreating(false); setForm(null); setError(""); }} className="flex-1 py-2 text-[12px] font-medium" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>Cancel</button>
+              <button onClick={handleCreate} disabled={busy} className="flex-1 py-2 text-[12px] font-semibold" style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: busy ? 0.6 : 1 }}>
+                {busy ? "Creating…" : "Create patch"}
+              </button>
+            </div>
+          </div>
+        )}
+        {error && <p className="text-[12px] mt-2" style={{ ...body, color: T.alert }}>{error}</p>}
+        {toast && <p className="text-[12px] mt-2" style={{ ...body, color: T.good }}>{toast}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ── Vouchers issued (2026-10-27) ────────────────────────────────────────────
+// Full read-only history of every voucher issued at this field: cancellation
+// credits and gifted free entries, via the listFieldVouchers callable (owners
+// can't read players' voucher docs directly). Loaded on tap, not on every
+// visit to this screen.
+const VOUCHER_STATUS = {
+  active: { label: "ACTIVE", tone: "accent" },
+  "partly-used": { label: "PARTLY USED", tone: "accent" },
+  used: { label: "USED", tone: "good" },
+  expired: { label: "EXPIRED", tone: "dim" },
+};
+
+function formatMsDate(ms) {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function VouchersIssuedCard({ field }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const res = await httpsCallable(functions, "listFieldVouchers")({ fieldId: field.id });
+      setData(res.data);
+    } catch (err) {
+      console.error("listFieldVouchers:", err);
+      setError("Couldn't load vouchers — try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const list = data ? data.vouchers.filter((v) => filter === "all" || v.status === filter || (filter === "active" && v.status === "partly-used")) : [];
+  const count = (s) => (data ? data.vouchers.filter((v) => (s === "active" ? v.status === "active" || v.status === "partly-used" : v.status === s)).length : 0);
+
+  return (
+    <div className="mb-5">
+      <Eyebrow>Vouchers Issued</Eyebrow>
+      <div className="p-4" style={{ background: T.panel, borderRadius: 12, boxShadow: T.shadowMd }}>
+        <p className="text-[13px] mb-3" style={{ ...body, color: T.ashDim }}>
+          Every voucher issued at this field: credits from canceled events or bookings, and free entries you've gifted.
+        </p>
+        {!data ? (
+          <button onClick={load} disabled={loading} className="px-4 py-2 text-[12px] font-semibold flex items-center gap-1.5"
+            style={{ ...display, background: T.accent, color: "#FFFFFF", borderRadius: T.rPill, opacity: loading ? 0.6 : 1 }}>
+            <Ticket size={13} /> {loading ? "Loading…" : "Show voucher history"}
+          </button>
+        ) : data.vouchers.length === 0 ? (
+          <p className="text-[12px]" style={{ ...body, color: T.ashFaint }}>No vouchers have been issued at this field yet.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {[["all", `All (${data.vouchers.length})`], ["active", `Active (${count("active")})`], ["used", `Used (${count("used")})`], ["expired", `Expired (${count("expired")})`]].map(([k, label]) => (
+                <button key={k} onClick={() => setFilter(k)} className="px-3 py-1 text-[11px] font-semibold"
+                  style={{ ...body, borderRadius: T.rPill, border: `1px solid ${filter === k ? T.accent : T.line}`, color: filter === k ? T.accent : T.ashDim }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col max-h-96 overflow-y-auto">
+              {list.map((v) => {
+                const st = VOUCHER_STATUS[v.status] || { label: v.status.toUpperCase(), tone: "dim" };
+                const color = st.tone === "good" ? T.good : st.tone === "accent" ? T.accent : T.ashDim;
+                return (
+                  <div key={`${v.uid}-${v.id}`} className="py-2 flex items-start justify-between gap-2" style={{ borderTop: `1px solid ${T.line}` }}>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium truncate" style={{ ...body, color: T.ash }}>{v.callsign}</div>
+                      <div className="text-[11px]" style={{ ...body, color: T.ashDim }}>
+                        {v.kind === "freeEntry"
+                          ? (v.gifted ? "Gifted free entry" : "Free entry (restored)")
+                          : `$${(v.amountCents / 100).toFixed(2)} of $${(v.originalAmountCents / 100).toFixed(2)} credit left`}
+                        {v.sourceEventTitle ? ` · from ${v.sourceEventTitle}` : ""}
+                      </div>
+                      <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>
+                        Issued {formatMsDate(v.issuedAtMs)} · expires {formatMsDate(v.expiresAtMs)}
+                        {v.redeemedAtMs ? ` · used ${formatMsDate(v.redeemedAtMs)}${v.redeemedEventTitle ? ` on ${v.redeemedEventTitle}` : ""}` : ""}
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 flex-shrink-0" style={{ ...mono, color, border: `1px solid ${color}`, borderRadius: T.rPill }}>{st.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {data.truncated && <p className="text-[11px] mt-2" style={{ ...body, color: T.ashFaint }}>Showing the 500 most recent.</p>}
+            <button onClick={load} disabled={loading} className="text-[12px] font-medium mt-2" style={{ ...body, color: T.accent }}>{loading ? "Refreshing…" : "Refresh"}</button>
+          </>
+        )}
+        {error && <p className="text-[12px] mt-2" style={{ ...body, color: T.alert }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onOpenEvents, profile }) {
   const [imageUrl, setImageUrl] = useState(field.imageUrl || null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
@@ -1756,6 +2278,8 @@ function FieldManageScreen({ field, onBack, updateFieldProfile, onOpenEvents, pr
 
       <div className="px-6 pt-4">
         <FreeEntryGiftsCard field={field} profile={profile} />
+        <FieldPatchesCard field={field} events={events} />
+        <VouchersIssuedCard field={field} />
         <Eyebrow>Field Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -6580,6 +7104,7 @@ export default function App() {
         updateFieldProfile={updateFieldProfile}
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
         profile={profile}
+        events={allMyEvents}
       />
     );
   } else if (overlay === "newEventChoice") {
