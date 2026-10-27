@@ -7,7 +7,7 @@ import { db } from "../lib/firebase";
 // isn't the same as showing up, same distinction the player app maintains
 // everywhere else. This is the closest honest thing we have until real
 // RSVP/booking and check-in scanning exist.
-export function useEventWaivers(eventId, hostOwnerId) {
+export function useEventWaivers(eventId, hostOwnerId, fieldId) {
   const [signatures, setSignatures] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -21,9 +21,16 @@ export function useEventWaivers(eventId, hostOwnerId) {
     // resource.data.hostOwnerId in firestore.rules, and Firestore only allows
     // a list query whose own filters prove the rule — so add that filter.
     // Field events keep the original eventId-only query, unchanged.
+    // Field events also filter on fieldId (2026-10-27): the read rule for a
+    // field event's signatures checks the field's owner (or its staff) via
+    // resource.data.fieldId, and Firestore only allows a list query whose
+    // own filters pin that field. The emulator showed the old eventId-only
+    // query is DENIED for the owner, so this list was coming back empty.
     const q = hostOwnerId
       ? query(collection(db, "waiverSignatures"), where("eventId", "==", eventId), where("hostOwnerId", "==", hostOwnerId))
-      : query(collection(db, "waiverSignatures"), where("eventId", "==", eventId));
+      : fieldId
+        ? query(collection(db, "waiverSignatures"), where("eventId", "==", eventId), where("fieldId", "==", fieldId))
+        : query(collection(db, "waiverSignatures"), where("eventId", "==", eventId));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -38,7 +45,7 @@ export function useEventWaivers(eventId, hostOwnerId) {
       }
     );
     return unsub;
-  }, [eventId, hostOwnerId]);
+  }, [eventId, hostOwnerId, fieldId]);
 
   return { signatures, signaturesLoading: loading };
 }

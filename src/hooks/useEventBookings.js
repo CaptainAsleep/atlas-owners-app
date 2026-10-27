@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, writeBatch } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { auth, db } from "../lib/firebase";
 
 // Real bookings for one event — a genuine commitment to attend, not just
 // interest. Every booking is guaranteed to already have a signed waiver if
@@ -142,8 +142,12 @@ export async function checkInPlayer(eventId, uid, method = "name") {
   // the copy they check never learned a check-in happened at all.
   const batch = writeBatch(db);
   const checkInMethod = method === "qr" ? "qr" : "name";
-  batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod });
-  batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod });
+  // checkedInBy (2026-10-27, Field Staff Logins): who did this check-in —
+  // the owner or one of their staff. firestore.rules requires it to be the
+  // caller's own uid (and requires it outright for staff).
+  const checkedInBy = auth.currentUser?.uid;
+  batch.update(bookingRef, { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod, checkedInBy });
+  batch.update(doc(db, "users", uid, "bookings", eventId), { checkedIn: true, checkedInAt: serverTimestamp(), checkInMethod, checkedInBy });
   await batch.commit();
   // Check-in stays booking-level: one scan checks in the whole party. The
   // attendee list is only for display (who just walked in).

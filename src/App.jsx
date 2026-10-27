@@ -6,7 +6,8 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useOwnerAuth } from "./hooks/useOwnerAuth";
-import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA, ORGANIZER_TERMS_VERSION, ORGANIZER_TERMS_OF_USE, ORGANIZER_PRIVACY_POLICY, ORGANIZER_EULA } from "./legalText";
+import { CURRENT_TERMS_VERSION, TERMS_OF_USE, PRIVACY_POLICY, EULA, ORGANIZER_TERMS_VERSION, ORGANIZER_TERMS_OF_USE, ORGANIZER_PRIVACY_POLICY, ORGANIZER_EULA, STAFF_AGREEMENT_VERSION, staffAgreementText } from "./legalText";
+import { useMyStaffGrants, useFieldStaff, inviteStaff, resendStaffInvite, removeStaff, cancelStaffInvite, acceptStaffAgreement, runAcceptStaffInvites, staffErrorMessage, STAFF_CAP } from "./hooks/useStaff";
 import { useAllFields, useMyFields, useMyPendingClaims, useFieldActions, useBannedPlayers, useBanActions, useFieldShippingAddress, useShippingAddressActions } from "./hooks/useOwnerFields";
 import { useOwnerEvents, useOwnerEventActions, useAfterActionCandidate } from "./hooks/useOwnerEvents";
 import { useEventWaivers, useRecentActivity } from "./hooks/useEventWaivers";
@@ -2571,7 +2572,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
   // deliberately gated the same way, per the 2026-09-28 scoping's
   // Decision #4, rather than fetched unconditionally.
   const { bookings: aarBookings, bookingsLoading: aarBookingsLoading } = useEventBookings(isPast ? ev.id : null);
-  const { signatures: aarSignatures } = useEventWaivers(isPast ? ev.id : null, ev.hostOwnerId);
+  const { signatures: aarSignatures } = useEventWaivers(isPast ? ev.id : null, ev.hostOwnerId, ev.fieldId);
   const { interestedCount: aarInterestedCount } = useEventInterestedCount(isPast ? ev.id : null);
   const { reservationBookings: aarAllBookings } = useOwnerReservationStats(isPast ? (allMyEvents || []) : []);
 
@@ -3781,17 +3782,22 @@ function LoadingScreen() {
 // `kind` picks the agreement set: "field" (field owners, the original text)
 // or "organizer" (event organizers, DRAFT). App() passes a `key` per kind so
 // the tab/checkbox state resets if both are ever needed back to back.
-function LegalAgreementScreen({ onAccept, kind = "field" }) {
-  const [tab, setTab] = useState("terms");
+function LegalAgreementScreen({ onAccept, kind = "field", staffFieldNames = [] }) {
+  const isStaffKind = kind === "staff";
+  const [tab, setTab] = useState(isStaffKind ? "staff" : "terms");
   const [checked, setChecked] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const isOrganizerKind = kind === "organizer";
-  const TABS = [
-    { key: "terms", label: "Terms of Use", text: isOrganizerKind ? ORGANIZER_TERMS_OF_USE : TERMS_OF_USE },
-    { key: "privacy", label: "Privacy Policy", text: isOrganizerKind ? ORGANIZER_PRIVACY_POLICY : PRIVACY_POLICY },
-    { key: "eula", label: "EULA", text: isOrganizerKind ? ORGANIZER_EULA : EULA },
-  ];
+  // Field Staff Logins (2026-10-27): staff accept one short agreement about
+  // player data instead of the owner's three documents.
+  const TABS = isStaffKind
+    ? [{ key: "staff", label: "Staff Agreement", text: staffAgreementText(staffFieldNames) }]
+    : [
+        { key: "terms", label: "Terms of Use", text: isOrganizerKind ? ORGANIZER_TERMS_OF_USE : TERMS_OF_USE },
+        { key: "privacy", label: "Privacy Policy", text: isOrganizerKind ? ORGANIZER_PRIVACY_POLICY : PRIVACY_POLICY },
+        { key: "eula", label: "EULA", text: isOrganizerKind ? ORGANIZER_EULA : EULA },
+      ];
   const activeText = TABS.find((t) => t.key === tab).text;
 
   const handleAccept = async () => {
@@ -3827,7 +3833,7 @@ function LegalAgreementScreen({ onAccept, kind = "field" }) {
           <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${checked ? T.ash : T.line}`, background: checked ? T.ash : "transparent", borderRadius: 4 }}>
             {checked && <Check size={13} color="#fff" strokeWidth={3} />}
           </div>
-          <span className="text-[12px]" style={{ ...body, color: T.ashDim }}>I've read and agree to the Terms of Use, Privacy Policy, and EULA.</span>
+          <span className="text-[12px]" style={{ ...body, color: T.ashDim }}>{isStaffKind ? "I've read and agree to the Atlas Staff Agreement." : "I've read and agree to the Terms of Use, Privacy Policy, and EULA."}</span>
         </button>
         <button
           onClick={handleAccept}
@@ -4035,7 +4041,16 @@ function CheckInScreen({ event, onBack }) {
           async (decodedText) => {
             if (busyRef.current) return;
             busyRef.current = true;
-            const result = await checkInFromScan(decodedText, event.id);
+            // A refused or failed write (offline, or a staff member whose
+            // access was removed mid-event) used to throw here and leave
+            // busyRef stuck — the scanner silently stopped reading codes.
+            let result;
+            try {
+              result = await checkInFromScan(decodedText, event.id);
+            } catch (err) {
+              console.error("scan check-in failed:", err);
+              result = { ok: false, reason: "write-failed" };
+            }
             const partyLines = (result.attendees || []).map((a) => ({
               name: `${a.fullName} · ${a.callsign}`,
               sub: guardianLine(a),
@@ -4051,6 +4066,8 @@ function CheckInScreen({ event, onBack }) {
               setStatus({ ok: false, message: "That code is for a different event" });
             } else if (result.reason === "not-booked") {
               setStatus({ ok: false, message: "No booking found for that code" });
+            } else if (result.reason === "write-failed") {
+              setStatus({ ok: false, message: "Couldn't check in. Check your signal, or your access to this event." });
             } else {
               setStatus({ ok: false, message: "Not a valid Atlas check-in code" });
             }
@@ -4154,8 +4171,20 @@ const guardianLine = (a) =>
   `${a.waiverSignatureId ? "Guardian has signed waiver" : "Minor"}${a.guardianPlaying === false ? " · parent not playing" : ""}${a.guardianName ? ` — ${a.guardianName}` : ""}${a.guardianPhone ? ` · ${a.guardianPhone}` : ""}`;
 
 /* ---------- Roster ---------- */
-function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile }) {
-  const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId);
+// staffMode (Field Staff Logins, 2026-10-27): the same roster for field
+// staff, minus everything that isn't check-in — no CSV exports, vouchers,
+// bans or dollar amounts. The server enforces the same limits.
+function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile, staffMode = false }) {
+  const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId, event.fieldId);
+  // Who did each check-in: the owner sees staff names; staff see only "you".
+  const { staff: fieldStaff } = useFieldStaff(!staffMode && !event.hostOwnerId ? event.fieldId : null);
+  const viewerUid = auth.currentUser?.uid || null;
+  const checkedInByLabel = (byUid) => {
+    if (!byUid) return null;
+    if (byUid === viewerUid) return "you";
+    if (staffMode) return null;
+    return fieldStaff.find((s) => s.uid === byUid)?.name || "former staff";
+  };
   const { bookings, bookingsLoading } = useEventBookings(event.id);
   const attendeeDetails = useAttendeeDetails(event.id, bookings);
   const bannedUids = new Set(banned.map((b) => b.uid));
@@ -4235,7 +4264,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
                   ? "FREE ENTRY"
                   : matchingBooking.paidByVoucher
                     ? "PAID · VOUCHER"
-                    : `PAID${typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}`}
+                    : `PAID${!staffMode && typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}`}
               </span>
             )}
             {matchingBooking?.guardianPlaying === false ? (
@@ -4266,6 +4295,12 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           {secondaryName && (
             <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{secondaryName}</div>
           )}
+          {checkedIn && matchingBooking?.checkedInAt?.toDate && (
+            <div className="text-[11px]" style={{ ...body, color: T.good }}>
+              Checked in {matchingBooking.checkedInAt.toDate().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              {checkedInByLabel(matchingBooking.checkedInBy) ? ` · by ${checkedInByLabel(matchingBooking.checkedInBy)}` : ""}
+            </div>
+          )}
           {(attendeeDetails[uid] || []).map((a) => (
             <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
               <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
@@ -4288,7 +4323,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               <FileSignature size={12} /> View Waiver
             </button>
           )}
-          {matchingBooking?.paid && typeof matchingBooking.amountPaidCents === "number" && matchingBooking.amountPaidCents > 0 && (
+          {!staffMode && matchingBooking?.paid && typeof matchingBooking.amountPaidCents === "number" && matchingBooking.amountPaidCents > 0 && (
             <button
               onClick={() => setConfirmGrant({ uid, name, booking: matchingBooking })}
               className="px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-transform duration-100 active:scale-95"
@@ -4298,7 +4333,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             </button>
           )}
           {/* Bans are per field — organizer events have no field to ban from. */}
-          {event.fieldId && (isBanned ? (
+          {event.fieldId && !staffMode && (isBanned ? (
             <button onClick={() => unbanPlayer(event.fieldId, uid)} className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
               Unban
             </button>
@@ -4358,7 +4393,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
 
         <div className="flex items-center justify-between mb-1">
           <Eyebrow>Reserved Players ({bookings.length})</Eyebrow>
-          {bookings.length > 0 && (
+          {bookings.length > 0 && !staffMode && (
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Reserved Players.csv`,
@@ -4451,7 +4486,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
 
         <div className="flex items-center justify-between mb-1">
           <Eyebrow>Waiver Signatures ({signatures.length})</Eyebrow>
-          {signatures.length > 0 && (
+          {signatures.length > 0 && !staffMode && (
             <button
               onClick={() => downloadCsv(
                 `${event.title} - Waiver Signatures.csv`,
@@ -4494,13 +4529,15 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
             {banned.map((b) => (
               <div key={b.uid} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
                 <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{b.name}</div>
-                <button
-                  onClick={() => unbanPlayer(event.fieldId, b.uid)}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95"
-                  style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}
-                >
-                  Unban
-                </button>
+                {!staffMode && (
+                  <button
+                    onClick={() => unbanPlayer(event.fieldId, b.uid)}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95"
+                    style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}
+                  >
+                    Unban
+                  </button>
+                )}
               </div>
             ))}
           </>
@@ -4650,7 +4687,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
     } catch (err) {
       console.error("checkInByCode failed:", err);
       playFeedbackSound(false);
-      setCodeMessage({ ok: false, text: "Couldn't check that code — try again." });
+      setCodeMessage({ ok: false, text: err?.code === "functions/failed-precondition" && err.message ? err.message : "Couldn't check that code — try again." });
     } finally {
       setCodeBusy(false);
     }
@@ -6190,7 +6227,7 @@ function OwnerFeedbackSection() {
   );
 }
 
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, setAccountRoles, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onLogout }) {
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, setAccountRoles, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onOpenStaff, onLogout }) {
   // Organizer-only accounts have no field fee model to show.
   const showFieldFee = isFieldOwner || !isOrganizer;
   const [rolesSaving, setRolesSaving] = useState(false);
@@ -6411,6 +6448,23 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
           <span className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>Year in Review</span>
           <ChevronRight size={16} color={T.ashFaint} />
         </button>
+
+        {hasFields && onOpenStaff && (
+          <>
+            <Eyebrow>Staff</Eyebrow>
+            <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
+              Give people their own login to check players in. They can't see money or change anything else.
+            </p>
+            <button
+              onClick={onOpenStaff}
+              className="w-full mb-6 p-4 flex items-center justify-between transition-transform duration-100 active:scale-[0.98]"
+              style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+            >
+              <span className="text-[13px] font-medium flex items-center gap-2" style={{ ...body, color: T.ash }}><Users size={15} /> Manage Staff</span>
+              <ChevronRight size={16} color={T.ashFaint} />
+            </button>
+          </>
+        )}
 
         {hasFields && <OwnerFeedbackSection />}
 
@@ -6830,6 +6884,355 @@ function NewEventChoiceScreen({ myFields, onBack, onPickField, onPickVenue }) {
   );
 }
 
+// ===========================================================================
+// Field Staff Logins (2026-10-27)
+// ===========================================================================
+// Owner side: Settings → Manage Staff. Staff side: verify email → staff
+// agreement → today's events → roster (staffMode) → check-in. Server rules
+// do the real enforcement; see firestore.rules and functions/staff.js.
+
+function StaffManageScreen({ myFields, onBack }) {
+  const [fieldId, setFieldId] = useState(myFields[0]?.id || null);
+  const field = myFields.find((f) => f.id === fieldId) || myFields[0] || null;
+  const { staff, invites, staffLoading } = useFieldStaff(field?.id || null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [rowBusy, setRowBusy] = useState(null);
+  const [confirmRemove, setConfirmRemove] = useState(null); // { kind: "staff" | "invite", id, name }
+  const count = staff.length + invites.length;
+  const atCap = count >= STAFF_CAP;
+
+  const switchField = (id) => { setFieldId(id); setError(""); setNotice(""); };
+
+  const handleAdd = async () => {
+    if (!field) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await inviteStaff(field.id, name, email);
+      setNotice(res?.emailSent ? `Invite sent to ${email.trim()}.` : "Invite saved, but the email didn't send. Tap Resend below.");
+      setName("");
+      setEmail("");
+    } catch (err) {
+      console.error("inviteStaff failed:", err);
+      setError(staffErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResend = async (inv) => {
+    setRowBusy(inv.id);
+    setError("");
+    setNotice("");
+    try {
+      const res = await resendStaffInvite(field.id, inv.id);
+      setNotice(res?.throttled ? "An invite went out to them under a minute ago. Give it a moment." : res?.emailSent ? `Invite re-sent to ${inv.emailLower}.` : "The email didn't send. Try again in a moment.");
+    } catch (err) {
+      console.error("resendStaffInvite failed:", err);
+      setError(staffErrorMessage(err));
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
+  const handleConfirmRemove = async () => {
+    if (!confirmRemove || !field) return;
+    setRowBusy(confirmRemove.id);
+    setError("");
+    try {
+      if (confirmRemove.kind === "staff") await removeStaff(field.id, confirmRemove.id);
+      else await cancelStaffInvite(field.id, confirmRemove.id);
+      setNotice(confirmRemove.kind === "staff" ? `${confirmRemove.name} no longer has staff access.` : "Invite canceled.");
+      setConfirmRemove(null);
+    } catch (err) {
+      console.error("remove staff failed:", err);
+      setError("Couldn't remove that — try again.");
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
+          <ChevronLeft size={20} color={T.ash} />
+        </button>
+        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>Staff</h1>
+      </div>
+
+      <div className="px-6 pt-4">
+        <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim, lineHeight: 1.5 }}>
+          Staff get their own login in this app. They can check players in at today's event: scan, search by name, or enter a code. They can't see money, edit anything, issue vouchers or ban players. Every check-in shows who did it.
+        </p>
+
+        {myFields.length > 1 && (
+          <div className="flex gap-1 mb-4 overflow-x-auto">
+            {myFields.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => switchField(f.id)}
+                className="px-3 py-1.5 text-[12px] font-semibold flex-shrink-0 transition-transform duration-100 active:scale-95"
+                style={{ ...body, color: field?.id === f.id ? "#FFFFFF" : T.ashDim, background: field?.id === f.id ? T.ash : T.panelAlt, borderRadius: 999 }}
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-1">
+          <Eyebrow>{field?.name || "Your field"}</Eyebrow>
+          <span className="text-[11px] font-semibold" style={{ ...mono, color: atCap ? T.alert : T.ashFaint }}>{count} of {STAFF_CAP}</span>
+        </div>
+
+        {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
+        {notice && <p className="text-[12px] mb-3" style={{ ...body, color: T.good }}>{notice}</p>}
+
+        {staffLoading ? (
+          <div className="text-[13px] py-4 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : (
+          <>
+            {staff.length === 0 && invites.length === 0 && (
+              <p className="text-[12px] mb-4" style={{ ...body, color: T.ashFaint }}>No staff yet.</p>
+            )}
+            {staff.map((s) => (
+              <div key={s.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{s.name}</div>
+                  <div className="text-[11px] truncate" style={{ ...body, color: T.ashFaint }}>{s.email}</div>
+                  <div className="text-[11px] flex items-center gap-1" style={{ ...body, color: s.agreementVersion ? T.good : T.ashFaint }}>
+                    {s.agreementVersion ? <><Check size={11} /> Active</> : "Hasn't accepted the staff agreement yet"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setConfirmRemove({ kind: "staff", id: s.id, name: s.name })}
+                  disabled={rowBusy === s.id}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold flex-shrink-0 transition-transform duration-100 active:scale-95"
+                  style={{ ...body, border: `1px solid ${T.alert}`, color: T.alert, borderRadius: T.rPill }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {invites.length > 0 && <div className="mt-4"><Eyebrow>Pending invites</Eyebrow></div>}
+            {invites.map((inv) => (
+              <div key={inv.id} className="mb-2 p-3 flex items-center justify-between" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium" style={{ ...body, color: T.ash }}>{inv.name}</div>
+                  <div className="text-[11px] truncate" style={{ ...body, color: T.ashFaint }}>{inv.emailLower}</div>
+                  <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>Invited — waiting for them to sign in</div>
+                </div>
+                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => handleResend(inv)}
+                    disabled={rowBusy === inv.id}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95"
+                    style={{ ...body, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: T.rPill, opacity: rowBusy === inv.id ? 0.6 : 1 }}
+                  >
+                    Resend
+                  </button>
+                  <button
+                    onClick={() => setConfirmRemove({ kind: "invite", id: inv.id, name: inv.name })}
+                    disabled={rowBusy === inv.id}
+                    className="px-2.5 py-1.5 text-[11px] font-semibold transition-transform duration-100 active:scale-95"
+                    style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        <div className="mt-5">
+          <Eyebrow>Add staff</Eyebrow>
+          {atCap ? (
+            <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>{STAFF_CAP} of {STAFF_CAP} staff. Remove someone to add another.</p>
+          ) : (
+            <>
+              <TextField label="Name" value={name} onChange={setName} placeholder="Jake Smith" />
+              <TextField label="Email" type="email" value={email} onChange={setEmail} placeholder="jake@example.com" />
+              <p className="text-[11px] mb-3" style={{ ...body, color: T.ashFaint }}>
+                We'll email them a link to this app. They sign in with this exact address, confirm it, and accept a short staff agreement.
+              </p>
+              <PrimaryButton onClick={handleAdd} disabled={busy || !name.trim() || !email.trim() || !field}>{busy ? "Sending…" : "Send Invite"}</PrimaryButton>
+            </>
+          )}
+        </div>
+      </div>
+
+      {confirmRemove && (
+        <div className="fixed inset-0 flex items-center justify-center px-6" style={{ background: "rgba(0,0,0,0.5)", zIndex: 2000 }} onClick={() => rowBusy === null && setConfirmRemove(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full p-5" style={{ background: T.panel, borderRadius: 8, maxWidth: 340 }}>
+            <div className="text-[15px] font-semibold mb-1" style={{ ...display, color: T.ash }}>
+              {confirmRemove.kind === "staff" ? `Remove ${confirmRemove.name}?` : `Cancel ${confirmRemove.name}'s invite?`}
+            </div>
+            <p className="text-[13px] mb-4" style={{ ...body, color: T.ashDim }}>
+              {confirmRemove.kind === "staff" ? "Their staff access ends right away. Check-ins they already did stay on the roster." : "The link in their email won't give them access anymore."}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmRemove(null)} disabled={rowBusy !== null} className="flex-1 py-2.5 text-[13px] font-medium transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+                Never mind
+              </button>
+              <button onClick={handleConfirmRemove} disabled={rowBusy !== null} className="flex-1 py-2.5 text-[13px] font-semibold transition-transform duration-100 active:scale-95" style={{ ...display, background: T.alert, color: "#fff", borderRadius: T.rPill, opacity: rowBusy !== null ? 0.6 : 1 }}>
+                {rowBusy !== null ? "Removing…" : confirmRemove.kind === "staff" ? "Remove" : "Cancel Invite"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StaffVerifyEmailScreen({ email, sent, onCheck, onResend, onLogout }) {
+  const [busy, setBusy] = useState(null); // "check" | "resend"
+  const [message, setMessage] = useState(sent ? `We sent a confirmation link to ${email}.` : "");
+
+  const run = async (kind) => {
+    setBusy(kind);
+    setMessage("");
+    try {
+      const r = kind === "check" ? await onCheck() : await onResend();
+      if (r?.status === "verify") {
+        setMessage(kind === "check"
+          ? "Not confirmed yet. Open the link in the email first (check spam too)."
+          : r.sent ? `Sent again to ${email}.` : r.throttled ? "A link went out under a minute ago. Check your inbox and spam." : "Couldn't send the email. Try again in a moment.");
+      }
+    } catch (err) {
+      console.error("staff verify check failed:", err);
+      setMessage("Something went wrong — try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col justify-center px-6" style={flatBg}>
+      <div className="mb-2 flex items-center gap-2" style={{ color: T.accent }}><Users size={18} /><span className="text-[11px] font-semibold uppercase" style={{ ...mono, letterSpacing: "0.08em" }}>Field Staff</span></div>
+      <h1 className="text-[22px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Confirm your email</h1>
+      <p className="text-[13px] mb-5" style={{ ...body, color: T.ashDim, lineHeight: 1.55 }}>
+        You've been added as staff. To make sure it's really you, open the confirmation link we emailed to <b>{email}</b>, then come back here.
+      </p>
+      {message && <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>{message}</p>}
+      <div className="mb-3">
+        <PrimaryButton onClick={() => run("check")} disabled={busy !== null}>{busy === "check" ? "Checking…" : "I've Confirmed It"}</PrimaryButton>
+      </div>
+      <button onClick={() => run("resend")} disabled={busy !== null} className="w-full py-3 text-[13px] font-semibold mb-2 transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ash, borderRadius: T.rPill }}>
+        {busy === "resend" ? "Sending…" : "Send the Link Again"}
+      </button>
+      <button onClick={onLogout} className="w-full py-3 text-[13px] font-medium flex items-center justify-center gap-2" style={{ ...body, color: T.ashFaint }}>
+        <LogOut size={14} /> Sign out
+      </button>
+    </div>
+  );
+}
+
+function StaffHomeScreen({ grants, user, onOpenRoster, onLogout }) {
+  const fieldIds = [...new Set(grants.map((g) => g.fieldId))].slice(0, 10);
+  const key = fieldIds.join(",");
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  // The staff phone is at the field, so its own date is the field's date.
+  // Re-checked every minute so an app left open overnight rolls over.
+  const [today, setToday] = useState(() => localDateStr());
+  useEffect(() => {
+    const t = setInterval(() => setToday(localDateStr()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    if (!key) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const unsub = onSnapshot(
+      query(collection(db, "events"), where("fieldId", "in", key.split(","))),
+      (snap) => {
+        setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.error("StaffHomeScreen events error:", err);
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, [key]);
+
+  // Today only (Michael, 2026-10-27). Organizer-hosted events at the field
+  // belong to the organizer, not the field's staff.
+  const todays = events
+    .filter((e) => !e.draft && !e.deleted && !e.canceled && !e.hostOwnerId && e.date && e.date <= today && today <= (e.endDate || e.date))
+    .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+  const byField = fieldIds.map((fid) => ({
+    fieldId: fid,
+    fieldName: grants.find((g) => g.fieldId === fid)?.fieldName || "Your field",
+    events: todays.filter((e) => e.fieldId === fid),
+  }));
+
+  return (
+    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="px-6 pt-6 pb-4 flex items-start justify-between">
+        <div>
+          <div className="mb-1 flex items-center gap-2" style={{ color: T.accent }}><Users size={15} /><span className="text-[11px] font-semibold uppercase" style={{ ...mono, letterSpacing: "0.08em" }}>Field Staff</span></div>
+          <div className="text-[20px] font-semibold" style={{ ...display, color: T.ash }}>Today's Check-In</div>
+          <div className="text-[12px]" style={{ ...body, color: T.ashFaint }}>{user?.email}</div>
+        </div>
+        <button onClick={onLogout} className="px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5 transition-transform duration-100 active:scale-95" style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill }}>
+          <LogOut size={13} /> Sign out
+        </button>
+      </div>
+
+      <div className="px-6">
+        {loading ? (
+          <div className="text-[13px] py-8 text-center" style={{ ...body, color: T.ashFaint }}>Loading…</div>
+        ) : byField.map((f) => (
+          <div key={f.fieldId} className="mb-6">
+            <Eyebrow>{f.fieldName}</Eyebrow>
+            {f.events.length === 0 ? (
+              <div className="p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+                <p className="text-[13px]" style={{ ...body, color: T.ashDim }}>No events today at {f.fieldName}.</p>
+                <p className="text-[11px] mt-1" style={{ ...body, color: T.ashFaint }}>Check-in opens here on the day of each event.</p>
+              </div>
+            ) : f.events.map((ev) => (
+              <button
+                key={ev.id}
+                onClick={() => onOpenRoster(ev)}
+                className="w-full mb-2 p-4 flex items-center justify-between text-left transition-transform duration-100 active:scale-[0.98]"
+                style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
+              >
+                <div className="min-w-0">
+                  <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{ev.title}</div>
+                  <div className="text-[12px] flex items-center gap-1.5" style={{ ...body, color: T.ashFaint }}>
+                    <Calendar size={12} />
+                    {ev.startTime ? formatTimeStr(ev.startTime) : "Today"}
+                    {typeof ev.bookedCount === "number" ? ` · ${ev.bookedCount} booked` : ""}
+                  </div>
+                </div>
+                <span className="text-[12px] font-semibold flex items-center gap-1 flex-shrink-0" style={{ ...body, color: T.accent }}>
+                  <QrCode size={14} /> Check In
+                </span>
+              </button>
+            ))}
+          </div>
+        ))}
+        <p className="text-[11px]" style={{ ...body, color: T.ashFaint, lineHeight: 1.5 }}>
+          As staff you can check players in on event days. Questions about your access? Ask the field's owner.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { needRefresh, refreshNow } = useSWUpdate();
   // Sets the real, trustworthy height — but not from window.screen.height
@@ -6978,6 +7381,36 @@ export default function App() {
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
 
+  // ── Field Staff Logins (2026-10-27) ──
+  // Live staff grants for this account, plus one acceptStaffInvites call per
+  // sign-in (turns pending invites for a verified email into grants, or
+  // sends the verification link). staffInviteCheck.uid ties the result to
+  // the account it was run for, so switching accounts re-runs it.
+  const { grants: staffGrants, grantsLoading: staffGrantsLoading } = useMyStaffGrants(user?.uid);
+  const [staffInviteCheck, setStaffInviteCheck] = useState({ uid: null, status: null });
+  const hasProfile = !!profile;
+  useEffect(() => {
+    if (!user?.uid || !hasProfile) return;
+    if (staffInviteCheck.uid === user.uid) return;
+    let cancelled = false;
+    setStaffInviteCheck({ uid: user.uid, status: "checking" });
+    runAcceptStaffInvites()
+      .then((r) => {
+        if (!cancelled) setStaffInviteCheck({ uid: user.uid, status: r.status, email: r.email, sent: !!r.sent, acceptedCount: (r.fields || []).length });
+      })
+      .catch((err) => {
+        // Never blocks a normal owner: an error just means "no staff step".
+        console.error("acceptStaffInvites failed:", err);
+        if (!cancelled) setStaffInviteCheck({ uid: user.uid, status: "error" });
+      });
+    return () => { cancelled = true; };
+  }, [user?.uid, hasProfile]);
+  const recheckStaffInvites = async (checkOnly) => {
+    const r = await runAcceptStaffInvites({ checkOnly });
+    setStaffInviteCheck({ uid: user.uid, status: r.status, email: r.email, sent: !!r.sent, acceptedCount: (r.fields || []).length });
+    return r;
+  };
+
   // Role tailoring (UX only — never used for permissions or fees; the server
   // decides those from field ownership / the event's own hostOwnerId+isMajor).
   // Field owner = said so, or actually owns a field. Organizer = said so.
@@ -6994,6 +7427,12 @@ export default function App() {
   const organizerOnly = isOrganizer && !isFieldOwner;
   const needsFieldTerms = !organizerOnly && profile?.acceptedTermsVersion !== CURRENT_TERMS_VERSION;
   const needsOrganizerTerms = isOrganizer && profile?.acceptedOrganizerTermsVersion !== ORGANIZER_TERMS_VERSION;
+  // Staff mode applies to accounts that are ONLY staff — an owner who is
+  // also staff somewhere else is out of v1 (Michael, 2026-10-27).
+  const noOwnerFootprint = !hasFields && !isOrganizer && pendingFields.length === 0 && !profile?.accountRoles?.fieldOwner;
+  const staffCheckDone = !!user && staffInviteCheck.uid === user.uid && staffInviteCheck.status !== "checking";
+  const staffOnly = noOwnerFootprint && staffGrants.length > 0;
+  const staffWaitingForGrants = noOwnerFootprint && staffInviteCheck.status === "accepted" && staffInviteCheck.acceptedCount > 0 && staffGrants.length === 0;
 
   const openField = (fieldId) => { setActiveFieldId(fieldId); setOverlay("field"); };
   const openClaim = () => setOverlay("claim");
@@ -7040,6 +7479,41 @@ export default function App() {
     content = <LoginScreen signIn={signIn} signUp={signUp} sendPasswordReset={sendPasswordReset} />;
   } else if (!profile) {
     content = <LoadingScreen />;
+  } else if (noOwnerFootprint && (staffGrantsLoading || !staffCheckDone || myFieldsLoading || pendingLoading || staffWaitingForGrants)) {
+    // Don't flash the owner role picker at someone who's about to be staff.
+    content = <LoadingScreen />;
+  } else if (noOwnerFootprint && staffInviteCheck.status === "verify") {
+    content = (
+      <StaffVerifyEmailScreen
+        email={staffInviteCheck.email || user.email}
+        sent={staffInviteCheck.sent}
+        onCheck={() => recheckStaffInvites(true)}
+        onResend={() => recheckStaffInvites(false)}
+        onLogout={handleLogout}
+      />
+    );
+  } else if (staffOnly && staffGrants.some((g) => g.agreementVersion !== STAFF_AGREEMENT_VERSION)) {
+    content = <LegalAgreementScreen key="staff" kind="staff" staffFieldNames={[...new Set(staffGrants.map((g) => g.fieldName).filter(Boolean))]} onAccept={() => acceptStaffAgreement(staffGrants)} />;
+  } else if (staffOnly) {
+    if (overlay === "checkIn" && rosterEvent) {
+      content = <CheckInScreen event={rosterEvent} onBack={() => setOverlay("roster")} />;
+    } else if (overlay === "roster" && rosterEvent) {
+      content = (
+        <RosterScreen
+          event={rosterEvent}
+          onBack={closeOverlay}
+          onOpenCheckIn={openCheckIn}
+          banned={banned}
+          bannedLoading={bannedLoading}
+          banPlayer={banPlayer}
+          unbanPlayer={unbanPlayer}
+          profile={profile}
+          staffMode
+        />
+      );
+    } else {
+      content = <StaffHomeScreen grants={staffGrants} user={user} onOpenRoster={openRoster} onLogout={handleLogout} />;
+    }
   } else if (rolesUndetermined) {
     content = <LoadingScreen />;
   } else if (needsRolePicker) {
@@ -7071,6 +7545,8 @@ export default function App() {
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("claimWelcome"); }}
       />
     );
+  } else if (overlay === "staffManage" && hasFields) {
+    content = <StaffManageScreen myFields={myFields} onBack={closeOverlay} />;
   } else if (overlay === "billing") {
     content = <FeeModelScreen profile={profile} user={user} onBack={closeOverlay} />;
   } else if (overlay === "payouts") {
@@ -7210,6 +7686,7 @@ export default function App() {
           onOpenBilling={() => setOverlay("billing")}
           onOpenPayouts={() => setOverlay("payouts")}
           onOpenYearInReview={() => setOverlay("yearInReview")}
+          onOpenStaff={() => setOverlay("staffManage")}
           onLogout={handleLogout}
         />
       );

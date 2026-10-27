@@ -229,3 +229,46 @@ To the maximum extent permitted by law, Atlas is not liable for damages arising 
 
 9. Entire Agreement
 This Agreement, together with the Terms of Use and Privacy Policy, constitutes the entire agreement between you and Atlas.`;
+
+// ── Field Staff Logins (2026-10-27) ──────────────────────────────────────
+// DRAFT — written by Claude for Michael's review, not reviewed by an
+// attorney. Covers minors' personal data, so worth a lawyer's read before
+// relying on it. Bump STAFF_AGREEMENT_VERSION whenever the text changes
+// meaningfully: every staff member then has to accept again before their
+// next check-in (the staff grant's agreementVersion is checked on sign-in).
+export const STAFF_AGREEMENT_VERSION = "2026-10-27-draft";
+export const STAFF_SUPPORT_CONTACT = "Michael@airsoftatlas.app";
+
+export function staffAgreementText(fieldNames) {
+  const list = (fieldNames || []).filter(Boolean);
+  const field = list.length === 0 ? "the field" : list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+  return `DRAFT — pending legal review.
+
+Atlas Staff Agreement
+
+${field} has added you as staff on Atlas so you can check players in at their events. Before you start, please read and agree to the following.
+
+1. What you'll have access to
+On event days, you'll be able to see that event's roster and check players in. This includes players' names and callsigns, whether they've paid and signed the waiver, and, for parties with children, each child's legal name, date of birth and their guardian's name and phone number.
+
+2. Use it only for check-in
+You'll use this information only to check players in and run the event for ${field}. You won't use it for anything else, including contacting players for your own reasons.
+
+3. Don't copy or share it
+You won't screenshot, copy, write down, export or share any player's information with anyone outside ${field}'s staff. That includes posting it anywhere.
+
+4. Children's information needs extra care
+Information about minors is especially sensitive. Only look at it when you need it to check a party in.
+
+5. Keep your login to yourself
+Your Atlas login is for you only. Don't share it or let anyone else check players in under your account. Every check-in records who did it.
+
+6. Access can end at any time
+${field} can remove your staff access at any time, and it ends immediately. Access also only works around event days.
+
+7. Report problems
+If you think player information has been seen or shared by someone who shouldn't have it, tell ${field} and Atlas right away at ${STAFF_SUPPORT_CONTACT}.
+
+8. Atlas's terms still apply
+This agreement is in addition to Atlas's Terms of Service and Privacy Policy.`;
+}
