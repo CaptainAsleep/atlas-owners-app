@@ -15,7 +15,7 @@ import { useEventBookings, useAttendeeDetails, useEventInterestedCount, useOwner
 import { useSWUpdate } from "./hooks/useSWUpdate";
 import { useVoucherGifts, searchPlayersForGift, giftFreeEntry, dateInputFromToday, endOfLocalDayMs, formatShortDate, giftErrorMessage, GIFT_MONTHLY_CAP } from "./hooks/useVoucherGifts";
 import { db, storage, functions, auth } from "./lib/firebase";
-import { FIELD_RULE_TYPES, MAX_ACTIVE_FIELD_PATCHES, describeRules, loadFieldCheckins, loadHolders, patchProgressRows } from "./patchProgress";
+import { FIELD_RULE_TYPES, MAX_ACTIVE_FIELD_PATCHES, describeRules, loadFieldCheckins, loadHolders, patchProgressRows, patchDocRef } from "./patchProgress";
 import { httpsCallable } from "firebase/functions";
 import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -1736,7 +1736,10 @@ function FieldPatchesCard({ field, events }) {
     let granted = 0; let failed = 0;
     await Promise.all([...picked].map(async (uid) => {
       try {
-        await setDoc(doc(db, "users", uid, "patches", expanded.grantDocId), {
+        // Adults: users/{uid}/patches. Children (Child Patches, 2026-10-27):
+        // their parent's dependents/{depId}/childPatches — same doc, and
+        // proofEventId is the parent's checked-in booking with the child on it.
+        await setDoc(patchDocRef(uid, expanded.grantDocId), {
           name: expanded.name,
           imageUrl: expanded.imageUrl,
           details: expanded.details || null,

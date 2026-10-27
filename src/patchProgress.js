@@ -152,30 +152,76 @@ export function ruleProgress(rule, fieldId, events, checkedIds, today = localTod
 }
 
 // Every player with a checked-in booking at this field's events.
-// Returns { [uid]: { uid, callsign, checkedIds: Set, proofEventId } }.
-// Child-only bookings (guardianPlaying === false) don't count — the parent
-// didn't play, same as the player app's isPlayedBooking.
+// Returns { [key]: { uid, callsign, checkedIds: Set, proofEventId } }.
+// Child-only bookings (guardianPlaying === false) don't count for the parent
+// — they didn't play, same as the player app's isPlayedBooking.
+//
+// Child Patches (2026-10-27): children on a checked-in booking are listed
+// too, so the owner can hand them a patch. Their key is
+// childKey(parentUid, depId) ("child:{parentUid}:{depId}"), read from the
+// booking's private attendeeDetails (owner-readable). The callsign shown is
+// "Ghost (Rogue's child)" — owners already see that pairing on their roster.
+export function childKey(parentUid, depId) {
+  return `child:${parentUid}:${depId}`;
+}
+export function parseChildKey(key) {
+  const m = /^child:([^:]+):([^:]+)$/.exec(key || "");
+  return m ? { parentUid: m[1], depId: m[2] } : null;
+}
+
 export async function loadFieldCheckins(fieldId, events) {
   const relevant = events.filter((e) => e.fieldId === fieldId && !e.deleted && !e.draft && !e.canceled && e.date <= localTodayStr());
   const snaps = await Promise.all(relevant.map((e) => getDocs(collection(db, "events", e.id, "bookings")).catch(() => null)));
   const players = {};
+  const familyReads = [];
   snaps.forEach((snap, i) => {
     if (!snap) return;
     snap.docs.forEach((d) => {
       const b = d.data();
-      if (!b.checkedIn || b.guardianPlaying === false) return;
+      if (!b.checkedIn) return;
       const uid = d.id;
-      if (!players[uid]) players[uid] = { uid, callsign: b.callsign || "Player", checkedIds: new Set(), proofEventId: relevant[i].id };
-      players[uid].checkedIds.add(relevant[i].id);
+      const eventId = relevant[i].id;
+      const hasChildren = b.guardianPlaying === false || (b.attendeeCount || 1) > 1;
+      if (hasChildren) {
+        familyReads.push(
+          getDocs(collection(db, "events", eventId, "bookings", uid, "attendeeDetails"))
+            .then((att) => ({ uid, eventId, parentCallsign: b.callsign || "Player", children: att.docs.map((x) => ({ depId: x.id, callsign: x.data().callsign || "Child" })) }))
+            .catch(() => null)
+        );
+      }
+      if (b.guardianPlaying === false) return;
+      if (!players[uid]) players[uid] = { uid, callsign: b.callsign || "Player", checkedIds: new Set(), proofEventId: eventId };
+      players[uid].checkedIds.add(eventId);
+    });
+  });
+  (await Promise.all(familyReads)).forEach((r) => {
+    if (!r) return;
+    r.children.forEach((ch) => {
+      const key = childKey(r.uid, ch.depId);
+      if (!players[key]) {
+        players[key] = { uid: key, kind: "child", parentUid: r.uid, depId: ch.depId, callsign: `${ch.callsign} (${r.parentCallsign}'s child)`, checkedIds: new Set(), proofEventId: r.eventId };
+      }
+      players[key].checkedIds.add(r.eventId);
     });
   });
   return players;
 }
 
-// Which of these players already own this patch (users/{uid}/patches is
-// public read; the doc id is the patch's grantDocId).
+// Where a player's (or child's) copy of a patch lives. Adults:
+// users/{uid}/patches (public read). Children:
+// users/{parentUid}/dependents/{depId}/childPatches (get is open to signed-in
+// users; the path needs the private dependent id).
+export function patchDocRef(key, grantDocId) {
+  const child = parseChildKey(key);
+  return child
+    ? doc(db, "users", child.parentUid, "dependents", child.depId, "childPatches", grantDocId)
+    : doc(db, "users", key, "patches", grantDocId);
+}
+
+// Which of these players already own this patch (the doc id is the patch's
+// grantDocId).
 export async function loadHolders(grantDocId, uids) {
-  const snaps = await Promise.all(uids.map((u) => getDoc(doc(db, "users", u, "patches", grantDocId)).catch(() => null)));
+  const snaps = await Promise.all(uids.map((u) => getDoc(patchDocRef(u, grantDocId)).catch(() => null)));
   return new Set(uids.filter((u, i) => snaps[i]?.exists()));
 }
 
