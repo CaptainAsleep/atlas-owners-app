@@ -2670,7 +2670,7 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, allMyEvents }) 
           </div>
           <div className="p-3 text-center" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
             <div className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>{displayPrice(ev.price)}</div>
-            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>Price</div>
+            <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>{ev.dayOfPrice ? `Prepay · ${displayPrice(ev.dayOfPrice)} day of` : "Price"}</div>
           </div>
         </div>
 
@@ -2891,6 +2891,12 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
   const [endTime, setEndTime] = useState(existing?.endTime || "");
   const [briefingTime, setBriefingTime] = useState(existing?.briefingTime || "");
   const [price, setPrice] = useState(existing?.price || "");
+  // Optional day-of price (2026-10-30). When set, `price` is the prepay
+  // price and this one is charged from midnight on game day (field's time
+  // zone) — enforced server-side in resolveEntryPrice. Base ticket only;
+  // Price Options add-ons don't change.
+  const [dayOfPrice, setDayOfPrice] = useState(existing?.dayOfPrice || "");
+  const hasDayOfPrice = !isBlankPriceText(dayOfPrice) && parsePrice(dayOfPrice) !== null;
   // Checkbox is the deliberate signal for "this event doesn't charge" —
   // reusing the existing blank-price-means-free behavior underneath
   // rather than adding a new persisted field. Defaults checked when
@@ -2990,6 +2996,7 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
   const hasChanges = !existing ||
     title !== snapshot.title || date !== snapshot.date || endDate !== snapshot.endDate ||
     startTime !== snapshot.startTime || endTime !== snapshot.endTime || briefingTime !== snapshot.briefingTime || price !== snapshot.price || maxCapacity !== snapshot.maxCapacity ||
+    dayOfPrice !== (existing?.dayOfPrice || "") ||
     type !== snapshot.type || description !== snapshot.description || imageUrl !== snapshot.imageUrl ||
     (venueMode && (
       hostName !== (existing?.hostName ?? defaultHostName) ||
@@ -3174,6 +3181,9 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
     endTime: endTime || null,
     briefingTime: briefingTime || null,
     price: isFreeEvent ? null : (price || null),
+    // Only kept alongside a real numeric prepay price — a free event or a
+    // "Price varies" text price has no prepay/day-of split to make.
+    dayOfPrice: !isFreeEvent && parsePrice(price) !== null && hasDayOfPrice ? dayOfPrice.trim() : null,
     // One optional group of player-picked, differently-priced choices
     // (weapon class, BB weight, etc.) — null for a normal flat-price or
     // free event. Only choices with both a label and a price are kept;
@@ -3235,6 +3245,16 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
     if (venueMode && !draft && !payoutsEnabled && ((!isFreeEvent && parsePrice(price) !== null) || addons.some((r) => r.name.trim() && (parsePrice(r.price) || 0) > 0) || groups.some((g) => g.choices.some((c) => c.label.trim() && (parsePrice(c.price) || 0) > 0)))) {
       setError("Set up payouts first (Dashboard → Set up payouts) — players can't pay for a paid event until that's done. You can still save it as a draft.");
       return;
+    }
+    if (!isFreeEvent && hasDayOfPrice) {
+      if (parsePrice(price) === null) {
+        setError("Set a prepay price (a plain number, e.g. 20) before adding a day-of price.");
+        return;
+      }
+      if (parsePrice(dayOfPrice) < parsePrice(price)) {
+        setError("The day-of price is lower than the prepay price — players would pay less by waiting. Double-check the two prices.");
+        return;
+      }
     }
     setSaving(true);
     setError("");
@@ -3459,13 +3479,23 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
                 </div>
               </div>
             ) : (
-              <TextField label="Entry Cost" value={price} onChange={setPrice} placeholder="25 (or clear and type 'Price varies')" />
+              <TextField label={hasDayOfPrice ? "Prepay Price" : "Entry Cost"} value={price} onChange={setPrice} placeholder="25 (or clear and type 'Price varies')" />
             )}
           </div>
           <div className="flex-1">
             <TextField label="Max Capacity" value={maxCapacity} onChange={setMaxCapacity} placeholder="120" type="number" />
           </div>
         </div>
+        {!isFreeEvent && (
+          <>
+            <TextField label="Day-of Price (optional)" value={dayOfPrice} onChange={setDayOfPrice} placeholder="e.g. 25 — leave blank for one flat price" />
+            <p className="text-[11px] mb-3 -mt-2" style={{ ...body, color: T.ashDim }}>
+              {hasDayOfPrice
+                ? `Players pay ${displayPrice(price)} if they book before game day, ${displayPrice(dayOfPrice)} from midnight on game day. Price Options add-ons stay the same.`
+                : "Charge more on game day: the price above becomes the prepay price, and this one applies from midnight on the event date."}
+            </p>
+          </>
+        )}
         {!isFreeEvent && projectedRevenue && (
           <p className="text-[12px] mb-3 -mt-1" style={{ ...body, color: T.ashDim }}>
             Projected Revenue (Gross): <span style={{ fontWeight: 600, color: T.accent }}>${projectedRevenue}</span> — entry cost × capacity, not a real payment yet
@@ -4312,7 +4342,7 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           )}
           {(attendeeDetails[uid] || []).map((a) => (
             <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
-              <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
+              <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.avatarUrl && <img src={a.avatarUrl} alt="" className="inline-block w-6 h-6 mr-1.5 align-middle" style={{ objectFit: "cover", borderRadius: 999 }} />}{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
               <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>
                 {guardianLine(a)}
               </div>
@@ -4794,7 +4824,7 @@ function ManualCheckInModal({ event, bookings, signatures, onClose }) {
                 )}
                 {(codeResult.attendees || []).map((a) => (
                   <div key={a.id} className="mt-1.5 pl-2" style={{ borderLeft: `2px solid ${T.line}` }}>
-                    <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
+                    <div className="text-[12px] font-medium" style={{ ...body, color: T.ash }}>{a.avatarUrl && <img src={a.avatarUrl} alt="" className="inline-block w-6 h-6 mr-1.5 align-middle" style={{ objectFit: "cover", borderRadius: 999 }} />}{a.fullName} <span style={{ color: T.ashFaint, fontWeight: 400 }}>· {a.callsign}</span></div>
                     <div className="text-[10px]" style={{ ...body, color: T.ashFaint }}>{guardianLine(a)}</div>
                   </div>
                 ))}
