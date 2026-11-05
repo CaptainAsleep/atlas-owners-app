@@ -4207,6 +4207,50 @@ const guardianLine = (a) =>
 // staffMode (Field Staff Logins, 2026-10-27): the same roster for field
 // staff, minus everything that isn't check-in — no CSV exports, vouchers,
 // bans or dollar amounts. The server enforces the same limits.
+// Team Bookings (2026-11-05): tickets a player bought for others. Claimed
+// ones are already on the roster as normal bookings ("BOUGHT BY …"); this
+// shows the paid-for spots that don't have a name yet. Owner only — the
+// teamTickets read rule needs the field's owner (staff can't read it).
+function TeamTicketSummary({ event }) {
+  const [tickets, setTickets] = useState([]);
+  useEffect(() => {
+    if (!event?.id || !event?.fieldId) return undefined;
+    const unsub = onSnapshot(
+      query(collection(db, "teamTickets"), where("fieldId", "==", event.fieldId), where("eventId", "==", event.id)),
+      (snap) => setTickets(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("TeamTicketSummary error:", err)
+    );
+    return unsub;
+  }, [event?.id, event?.fieldId]);
+  const open = tickets.filter((t) => t.status === "unassigned" || t.status === "pending");
+  if (open.length === 0) return null;
+  const byBuyer = {};
+  for (const t of open) {
+    const k = t.buyerCallsign || "A player";
+    byBuyer[k] = byBuyer[k] || { waiting: [], unassigned: 0 };
+    if (t.status === "pending") byBuyer[k].waiting.push(t.assigneeCallsign || "?");
+    else byBuyer[k].unassigned += 1;
+  }
+  return (
+    <div className="p-3 mb-4" style={{ background: T.panel, borderRadius: 6, border: `1px solid ${T.line}` }}>
+      <div className="text-[10px] font-semibold uppercase mb-1" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.06em" }}>
+        Paid, not yet claimed ({open.length})
+      </div>
+      {Object.entries(byBuyer).map(([buyer, info]) => (
+        <p key={buyer} className="text-[12px] mb-1" style={{ ...body, color: T.ashDim }}>
+          <strong style={{ color: T.ash }}>{buyer}</strong> bought tickets for others:{" "}
+          {info.waiting.length > 0 && `${info.waiting.join(", ")} still ${info.waiting.length === 1 ? "has" : "have"} to sign the waiver`}
+          {info.waiting.length > 0 && info.unassigned > 0 && "; "}
+          {info.unassigned > 0 && `${info.unassigned} not handed out yet`}.
+        </p>
+      ))}
+      <p className="text-[11px]" style={{ ...body, color: T.ashFaint }}>
+        These spots are paid for. A walk-up can still use one on game day: the buyer sends it to them in Atlas and they sign the waiver on their phone.
+      </p>
+    </div>
+  );
+}
+
 function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile, staffMode = false }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId, event.fieldId);
   // Who did each check-in: the owner sees staff names; staff see only "you".
@@ -4301,6 +4345,8 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
               <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: matchingBooking.freeEntry ? T.good : T.accent, border: `1px solid ${matchingBooking.freeEntry ? T.good : T.accent}`, borderRadius: T.rPill }}>
                 {matchingBooking.freeEntry
                   ? "FREE ENTRY"
+                  : matchingBooking.paidByTeamTicket
+                    ? `BOUGHT BY ${String(matchingBooking.purchasedByCallsign || "A PLAYER").toUpperCase()}`
                   : matchingBooking.paidByVoucher
                     ? "PAID · VOUCHER"
                     : `PAID${!staffMode && typeof matchingBooking.amountPaidCents === "number" ? ` $${(matchingBooking.amountPaidCents / 100).toFixed(2)}` : ""}`}
@@ -4429,6 +4475,8 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
         )}
 
         {!bookingsLoading && <SelectionTally event={event} bookings={bookings} />}
+
+        {!staffMode && <TeamTicketSummary event={event} />}
 
         <div className="flex items-center justify-between mb-1">
           <Eyebrow>Reserved Players ({bookings.length})</Eyebrow>
