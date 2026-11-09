@@ -6621,7 +6621,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
 
         <Eyebrow>Support</Eyebrow>
         <a
-          href="https://discord.gg/hR8EntGsq"
+          href="https://discord.gg/4FFyd2qAs"
           target="_blank"
           rel="noreferrer"
           className="w-full mb-6 p-4 flex items-center justify-between"
