@@ -1275,7 +1275,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
                 ) : (
                   <div className="w-56 h-56 flex items-center justify-center" style={{ color: T.ashFaint }}>Generating…</div>
                 )}
-                <p className="text-[11px] text-center mt-2" style={{ ...body, color: T.ashFaint }}>Have them scan this from their own Profile → Scan a Patch Code.</p>
+                <p className="text-[11px] text-center mt-2" style={{ ...body, color: T.ashFaint }}>Have them scan this from their own Profile → Scan a Code.</p>
               </div>
             )}
           </>
