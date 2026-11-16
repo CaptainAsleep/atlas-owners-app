@@ -815,7 +815,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   }, [allFields]);
 
   const filtered = allFields
-    .filter((f) => !["relocated", "closed", "no-airsoft"].includes(f.status))
+    .filter((f) => !["relocated", "closed", "no-airsoft", "delisted"].includes(f.status))
     .filter((f) => {
       const q = search.trim().toLowerCase();
       if (!q) return true;
