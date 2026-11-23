@@ -1529,7 +1529,7 @@ function RuleEditor({ rule, onChange }) {
           className="w-20 px-3 py-2 text-[13px] outline-none" style={inputStyle} />
         {rule.type === "event_type" && (
           <select value={rule.eventType} onChange={(e) => set("eventType", e.target.value)} className="flex-1 px-3 py-2 text-[13px] outline-none" style={inputStyle}>
-            {GAME_TYPES.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+            {PATCH_EVENT_TYPES.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
           </select>
         )}
         {rule.type === "night" && (
@@ -1580,7 +1580,7 @@ function RulesForm({ value, onChange }) {
         </>
       )}
       <p className="text-[12px] p-2" style={{ ...body, color: T.ash, background: T.panelAlt, borderRadius: 6 }}>
-        {describeRules(manual ? [] : rules.map(cleanRule), GAME_TYPES)}
+        {describeRules(manual ? [] : rules.map(cleanRule), PATCH_EVENT_TYPES)}
       </p>
     </div>
   );
@@ -1786,7 +1786,7 @@ function FieldPatchesCard({ field, events }) {
                   <img src={p.imageUrl} alt="" className="w-10 h-10 flex-shrink-0" style={{ objectFit: "contain", opacity: p.active === false ? 0.4 : 1 }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-semibold truncate" style={{ ...display, color: T.ash }}>{p.name}</div>
-                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{describeRules(p.rules, GAME_TYPES)}</div>
+                    <div className="text-[11px]" style={{ ...body, color: T.ashFaint }}>{describeRules(p.rules, PATCH_EVENT_TYPES)}</div>
                   </div>
                   {p.active === false && <span className="text-[9px] font-semibold px-1.5 py-0.5" style={{ ...mono, color: T.ashDim, border: `1px solid ${T.line}`, borderRadius: T.rPill }}>RETIRED</span>}
                   <ChevronRight size={14} color={T.ashFaint} style={{ transform: expandedId === p.id ? "rotate(90deg)" : "none" }} />
@@ -2520,6 +2520,10 @@ const GAME_TYPES = [
   { key: "INDOOR", label: "Indoor" },
   { key: "TOURNAMENT", label: "Tournament" },
 ];
+// Patch rules can also target Major (organizer) events, which carry
+// type "MAJOR" instead of a game type (2026-11-23). Not offered in the
+// field event editor.
+const PATCH_EVENT_TYPES = [...GAME_TYPES, { key: "MAJOR", label: "Major" }];
 
 // The real landing page when an owner taps into one of their events — a
 // summary with real stats, not straight into the edit form. Mirrors
