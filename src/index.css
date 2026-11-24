@@ -14,7 +14,7 @@ html, body, #root {
   */
   height: var(--real-screen-height, 100%);
   margin: 0;
-  background-color: #F2F2ED;
+  background-color: #111315;
   overflow: hidden;
   position: fixed;
   top: 0;
