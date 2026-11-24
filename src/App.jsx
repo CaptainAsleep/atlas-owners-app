@@ -2161,6 +2161,12 @@ function VouchersIssuedCard({ field }) {
 }
 
 function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onOpenEvents, profile }) {
+  // Tabbed layout (2026-11 redesign): one group of settings at a time
+  // instead of one very long page. All state stays in this component.
+  const FIELD_SECTIONS = [["profile", "Profile"], ["rules", "Rules & gear"], ["rewards", "Rewards"], ["shipping", "Shipping"]];
+  const [section, setSection] = useState("profile");
+  const fieldScrollRef = useRef(null);
+  useEffect(() => { if (fieldScrollRef.current) fieldScrollRef.current.scrollTop = 0; }, [section]);
   const [imageUrl, setImageUrl] = useState(field.imageUrl || null);
   const [bannerUploading, setBannerUploading] = useState(false);
   const bannerInputRef = React.useRef(null);
@@ -2436,18 +2442,41 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
-      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
-        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
+    <div className="h-full relative">
+    <div ref={fieldScrollRef} className="h-full overflow-y-auto" style={{ ...flatBg, paddingBottom: 120 }}>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <button onClick={onBack} aria-label="Back" className="flex items-center justify-center flex-shrink-0 transition-transform duration-100 active:scale-90" style={{ width: 44, height: 44, borderRadius: 12, background: T.panel, border: `1px solid ${T.line}` }}>
           <ChevronLeft size={20} color={T.ash} />
         </button>
-        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{field.name}</h1>
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-semibold uppercase leading-none" style={{ ...mono, color: T.accent, letterSpacing: "0.1em" }}>Field profile</div>
+          <div className="text-[26px] font-bold uppercase leading-none truncate mt-1" style={{ ...cond, color: T.ash }}>{field.name}</div>
+        </div>
       </div>
 
-      <div className="px-6 pt-4">
-        <FreeEntryGiftsCard field={field} profile={profile} />
-        <FieldPatchesCard field={field} events={events} />
-        <VouchersIssuedCard field={field} />
+      <div className="flex gap-2 mt-4 px-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+        {FIELD_SECTIONS.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setSection(key)}
+            aria-current={section === key ? "page" : undefined}
+            className="text-[13px] font-semibold whitespace-nowrap flex-shrink-0 transition-transform duration-100 active:scale-95"
+            style={{ ...body, minHeight: 44, padding: "0 16px", borderRadius: T.rPill, border: `1px solid ${section === key ? T.ash : T.line}`, background: section === key ? T.ash : "transparent", color: section === key ? T.onAsh : T.ashDim }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="px-5 pt-5">
+        {section === "rewards" && (<>
+          <p className="text-[12px] mb-4" style={{ ...body, color: T.ashDim }}>Free-entry gifts, check-in patches and vouchers. These save as you go.</p>
+          <FreeEntryGiftsCard field={field} profile={profile} />
+          <FieldPatchesCard field={field} events={events} />
+          <VouchersIssuedCard field={field} />
+        </>)}
+
+        {section === "profile" && (<>
         <Eyebrow>Field Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -2563,6 +2592,9 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
           </button>
         </div>
 
+        </>)}
+
+        {section === "rules" && (<>
         <Eyebrow>Field Rules (one per line)</Eyebrow>
         <TextField value={rulesText} onChange={setRulesText} rows={5} placeholder="Full-seal eye protection required at all times…" />
 
@@ -2582,7 +2614,7 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
               <input value={ch.label} onChange={(e) => updateChronoLimit(i, "label", e.target.value)} placeholder="e.g. AEG, Sniper, Pistol"
                 className="w-28 flex-shrink-0 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
               <input value={ch.value} onChange={(e) => updateChronoLimit(i, "value", e.target.value)} placeholder="e.g. 400 FPS max (0.20g)"
-                className="flex-1 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
+                className="flex-1 min-w-0 px-2.5 py-2 text-[13px] bg-transparent outline-none" style={{ ...body, background: T.panelAlt, border: `1px solid ${T.line}`, borderRadius: 4, color: T.ash }} />
               <button onClick={() => removeChronoLimit(i)} className="w-9 h-9 flex-shrink-0 flex items-center justify-center transition-transform duration-100 active:scale-90" style={{ background: T.panelAlt, borderRadius: T.rPill }}>
                 <Trash2 size={14} color={T.alert} />
               </button>
@@ -2648,6 +2680,9 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
           </div>
         ))}
 
+        </>)}
+
+        {section === "shipping" && (<>
         <Eyebrow>Shipping Address</Eyebrow>
         <p className="text-[11px] mb-3 -mt-1" style={{ ...body, color: T.ashFaint }}>
           Where should we send your welcome package (stickers, a tablet stand, etc.)? This can be different from your field's public address above — handy for fields where no one's usually on-site to receive mail. Private: only you and the Atlas team can see this, it's never shown to players.
@@ -2668,12 +2703,20 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
         </div>
         <TextField label="Delivery Notes (optional)" value={shipNotes} onChange={setShipNotes} placeholder="Gate code, best drop-off spot, etc." rows={2} />
 
-        {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
-        {saved && <p className="text-[12px] mb-2" style={{ ...body, color: T.good }}>Saved — live on the player app now.</p>}
-        <div className="mb-6">
-          <PrimaryButton onClick={handleSave} disabled={saving || !hasChanges}>{saving ? "Saving…" : "Save Profile Changes"}</PrimaryButton>
-        </div>
+        </>)}
+
+        {error && <p className="text-[13px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
+        {saved && !hasChanges && <p className="text-[13px] mb-2" style={{ ...body, color: T.good }}>Saved. It's live on the player app now.</p>}
       </div>
+    </div>
+    {(hasChanges || saving) && (
+      <div className="absolute left-3 right-3 flex items-center gap-3" style={{ bottom: "calc(12px + env(safe-area-inset-bottom, 0px))", padding: "8px 8px 8px 16px", borderRadius: T.rFloat, background: T.glassFill, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: T.glassBorder, boxShadow: T.shadowFloat, zIndex: 50 }}>
+        <span className="flex-1 text-[13px]" style={{ ...body, color: T.ashDim }}>Unsaved changes</span>
+        <button onClick={handleSave} disabled={saving} className="px-6 text-[14px] font-semibold transition-transform duration-100 active:scale-[0.98]" style={{ ...body, minHeight: 52, borderRadius: 14, background: T.accent, color: T.onAccent, opacity: saving ? 0.6 : 1 }}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    )}
     </div>
   );
 }
