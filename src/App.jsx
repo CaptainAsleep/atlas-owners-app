@@ -469,7 +469,7 @@ function LoginScreen({ signIn, signUp, sendPasswordReset }) {
   };
 
   return (
-    <div className="h-full flex flex-col px-6 overflow-y-auto" style={flatBg}>
+    <div className="h-full flex flex-col px-6 overflow-y-auto" style={{ ...flatBg }}>
       <div className="flex flex-col items-center mt-12 mb-8">
         <div className="w-14 h-14 flex items-center justify-center mb-3 overflow-hidden" style={{ borderRadius: 8 }}>
           <img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="Atlas" className="w-full h-full" style={{ objectFit: "cover" }} />
@@ -1115,7 +1115,7 @@ function ClaimFieldScreen({ onBack, allFields, allFieldsLoading, ownerId, ownerE
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
           <ChevronLeft size={20} color={T.ash} />
@@ -1314,7 +1314,7 @@ function FieldOverviewScreen({ field, events, eventsLoading, onBack, onEdit, onO
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
           <ChevronLeft size={20} color={T.ash} />
@@ -2436,7 +2436,7 @@ function FieldManageScreen({ field, events = [], onBack, updateFieldProfile, onO
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
           <ChevronLeft size={20} color={T.ash} />
@@ -3043,6 +3043,12 @@ function EventOverviewScreen({ ev, onBack, onEdit, onOpenRoster, onOpenCheckIn, 
 // The mode is fixed for an event's life — isMajor/fieldId/hostOwnerId are
 // immutable in the Firestore rules.
 function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName = "", payoutsEnabled, existing, onBack, createEvent, createMajorEvent, updateEvent, newEventId, allFields }) {
+  // Step-by-step layout (2026-11 redesign). Every field still lives in this
+  // one component's state, so moving between steps never loses anything.
+  const EDIT_STEPS = ["Basics", "Tickets", "Details", "Review"];
+  const [step, setStep] = useState(0);
+  const editorScrollRef = useRef(null);
+  useEffect(() => { if (editorScrollRef.current) editorScrollRef.current.scrollTop = 0; }, [step]);
   const [eventId] = useState(existing?.id || newEventId());
   const [title, setTitle] = useState(existing?.title || "");
   // Venue-mode fields (unused in field mode). lat/lng are only ever set by
@@ -3471,17 +3477,47 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
     }
   };
 
+  const stepTitles = ["The basics", "Tickets & capacity", "Details & waiver", "Review & publish"];
+  const summaryRows = [
+    ["Name", title || "—"],
+    ["When", [date || "No date", endDate ? `– ${endDate}` : null, startTime ? `· ${formatTimeStr(startTime)}` : null].filter(Boolean).join(" ")],
+    ["Where", venueMode ? ([venueName, venueCity].filter(Boolean).join(", ") || "—") : (field?.name || "—")],
+    ["Price", isFreeEvent ? "Free" : (displayPrice(price) || "—")],
+    ["Capacity", String(maxCapacity || "").trim() ? String(maxCapacity) : "No limit"],
+    ["Waiver", String(waiverText || "").trim() ? "Yes" : "None"],
+    ["Check-in patch", patchImageUrl ? "Yes" : "None"],
+  ];
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden pb-10" style={flatBg}>
-      <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
-        <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
-          <ChevronLeft size={20} color={T.ash} />
+    <div className="h-full relative">
+    <div ref={editorScrollRef} className="h-full overflow-y-auto overflow-x-hidden" style={{ ...flatBg, paddingBottom: 120 }}>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <button onClick={onBack} aria-label="Close" className="flex items-center justify-center flex-shrink-0 transition-transform duration-100 active:scale-90" style={{ width: 44, height: 44, borderRadius: 12, background: T.panel, border: `1px solid ${T.line}` }}>
+          <X size={18} color={T.ash} />
         </button>
-        <h1 className="flex-1 text-center text-[18px] font-semibold mr-9" style={{ ...display, color: T.ash }}>{existing ? "Edit Event" : "Create New Event"}</h1>
+        <div className="flex-1 text-center text-[15px] font-semibold" style={{ ...body, color: T.ash }}>{existing ? "Edit event" : "New event"}</div>
+        <button
+          onClick={() => handleSave(true)}
+          disabled={saving || !hasChanges}
+          className="px-3 text-[13px] font-semibold flex-shrink-0 transition-transform duration-100 active:scale-95"
+          style={{ ...body, minHeight: 44, borderRadius: 12, color: T.accent, opacity: saving || !hasChanges ? 0.4 : 1 }}
+        >
+          Save draft
+        </button>
       </div>
 
-      <div className="px-6 pt-4" style={{ maxWidth: "100%" }}>
+      <div className="grid gap-1.5 px-5 pt-4" style={{ gridTemplateColumns: `repeat(${EDIT_STEPS.length}, minmax(0, 1fr))` }}>
+        {EDIT_STEPS.map((label, i) => (
+          <button key={label} onClick={() => setStep(i)} className="text-left" style={{ minHeight: 36 }} aria-current={step === i ? "step" : undefined}>
+            <div style={{ height: 4, borderRadius: 2, background: i <= step ? T.accent : T.line }} />
+            <div className="text-[10px] font-semibold uppercase mt-1.5" style={{ ...mono, letterSpacing: "0.08em", color: i === step ? T.ash : i < step ? T.ashDim : T.ashFaint }}>{label}</div>
+          </button>
+        ))}
+      </div>
 
+      <div className="px-5 pt-4" style={{ maxWidth: "100%" }}>
+        <div className="text-[32px] font-bold uppercase leading-none mb-5" style={{ ...cond, color: T.ash }}>{stepTitles[step]}</div>
+
+        {step === 0 && (<>
         <Eyebrow>Event Banner</Eyebrow>
         <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerSelected} className="hidden" />
         <button
@@ -3649,6 +3685,9 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
           </>
         )}
 
+        </>)}
+
+        {step === 1 && (<>
         <Eyebrow>Pricing & Capacity</Eyebrow>
         <label className="flex items-center gap-2 mb-3 text-[12px]" style={{ ...body, color: T.ashDim }}>
           <input type="checkbox" checked={isFreeEvent} onChange={(e) => toggleFreeEvent(e.target.checked)} />
@@ -3818,6 +3857,9 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
         </>
         )}
 
+        </>)}
+
+        {step === 2 && (<>
         <TextField label="Event Description" value={description} onChange={setDescription} rows={4} placeholder="Describe your event schedule, briefing instructions, game modes, and parking locations." />
 
         <Eyebrow>Waiver</Eyebrow>
@@ -3881,21 +3923,37 @@ function EventEditScreen({ field, venueMode = false, ownerUid, defaultHostName =
           )}
         </div>
 
-        {error && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
-        <div className="mb-2">
-          <PrimaryButton onClick={() => handleSave(false)} disabled={saving || !canPublish}>{saving ? "Saving…" : "Publish Event"}</PrimaryButton>
-        </div>
-        <div className="mb-6">
-          <button
-            onClick={() => handleSave(true)}
-            disabled={saving || !hasChanges}
-            className="w-full py-3 font-semibold text-[14px] transition-transform duration-100 active:scale-[0.98]"
-            style={{ ...body, border: `1px solid ${T.line}`, color: T.ashDim, borderRadius: T.rPill, opacity: saving || !hasChanges ? 0.5 : 1 }}
-          >
-            Save as Draft
-          </button>
-        </div>
+        </>)}
+
+        {step === 3 && (
+          <div className="mb-4" style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: T.rCard, padding: "2px 14px" }}>
+            {summaryRows.map(([k, v], i) => (
+              <div key={k} className="flex items-center justify-between gap-3" style={{ minHeight: 48, borderTop: i ? `1px solid ${T.line}` : "none" }}>
+                <span className="text-[13px]" style={{ ...body, color: T.ashDim }}>{k}</span>
+                <span className="text-[14px] font-semibold text-right truncate" style={{ ...body, color: T.ash, maxWidth: "65%" }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {error && <p className="text-[13px] mb-2" style={{ ...body, color: T.alert }}>{error}</p>}
       </div>
+    </div>
+    <div className="absolute left-3 right-3 flex gap-2" style={{ bottom: "calc(12px + env(safe-area-inset-bottom, 0px))", padding: 8, borderRadius: T.rFloat, background: T.glassFill, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: T.glassBorder, boxShadow: T.shadowFloat, zIndex: 50 }}>
+      {step > 0 && (
+        <button onClick={() => setStep(step - 1)} className="px-5 text-[14px] font-semibold transition-transform duration-100 active:scale-[0.98]" style={{ ...body, minHeight: 52, borderRadius: 14, border: `1px solid ${T.line}`, color: T.ash }}>
+          Back
+        </button>
+      )}
+      {step < EDIT_STEPS.length - 1 ? (
+        <button onClick={() => setStep(step + 1)} className="flex-1 text-[14px] font-semibold transition-transform duration-100 active:scale-[0.98]" style={{ ...body, minHeight: 52, borderRadius: 14, background: T.accent, color: T.onAccent }}>
+          Next: {EDIT_STEPS[step + 1]}
+        </button>
+      ) : (
+        <button onClick={() => handleSave(false)} disabled={saving || !canPublish} className="flex-1 text-[14px] font-semibold transition-transform duration-100 active:scale-[0.98]" style={{ ...body, minHeight: 52, borderRadius: 14, background: T.accent, color: T.onAccent, opacity: saving || !canPublish ? 0.5 : 1 }}>
+          {saving ? "Saving…" : existing && !existing.draft ? "Save changes" : "Publish event"}
+        </button>
+      )}
+    </div>
     </div>
   );
 }
@@ -3975,7 +4033,7 @@ function LoadingScreen() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center gap-5 px-8" style={flatBg}>
+    <div className="h-screen flex flex-col items-center justify-center gap-5 px-8" style={{ ...flatBg }}>
       <style>{FONTS}</style>
       <style>{LOADING_KEYFRAMES}</style>
       <AtlasALoader color={T.accent} />
@@ -4025,7 +4083,7 @@ function LegalAgreementScreen({ onAccept, kind = "field", staffFieldNames = [] }
   };
 
   return (
-    <div className="h-screen flex flex-col" style={flatBg}>
+    <div className="h-screen flex flex-col" style={{ ...flatBg }}>
       <style>{FONTS}</style>
       <div className="px-6 pt-8 pb-3">
         <h1 className="text-[18px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Before you continue</h1>
@@ -4107,7 +4165,7 @@ function RoleSelectionScreen({ onSave, onLogout }) {
   };
 
   return (
-    <div className="h-screen flex flex-col px-6 overflow-y-auto" style={flatBg}>
+    <div className="h-screen flex flex-col px-6 overflow-y-auto" style={{ ...flatBg }}>
       <style>{FONTS}</style>
       <div className="pt-10 pb-4">
         <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>What brings you to Atlas?</h1>
@@ -4436,7 +4494,7 @@ function TeamTicketSummary({ event }) {
   );
 }
 
-function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile, staffMode = false, daylight = false, onToggleDaylight }) {
+function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, banPlayer, unbanPlayer, profile, staffMode = false }) {
   const { signatures, signaturesLoading } = useEventWaivers(event.id, event.hostOwnerId, event.fieldId);
   // Who did each check-in: the owner sees staff names; staff see only "you".
   const { staff: fieldStaff } = useFieldStaff(!staffMode && !event.hostOwnerId ? event.fieldId : null);
@@ -4667,11 +4725,6 @@ function RosterScreen({ event, onBack, onOpenCheckIn, banned, bannedLoading, ban
           <div className="text-[10px] font-semibold uppercase leading-none" style={{ ...mono, color: T.ashFaint, letterSpacing: "0.1em" }}>Check-in · roster</div>
           <div className="text-[16px] font-bold truncate mt-1" style={{ ...body, color: T.ash }}>{event.title}</div>
         </div>
-        {onToggleDaylight && (
-          <button onClick={onToggleDaylight} aria-pressed={!!daylight} className="flex items-center gap-1.5 px-3 text-[12px] font-bold flex-shrink-0 transition-transform duration-100 active:scale-95" style={{ ...body, minHeight: 44, borderRadius: 12, border: `1.5px solid ${T.ash}`, color: T.ash }}>
-            {daylight ? <Moon size={16} /> : <Sun size={16} />}{daylight ? "Night" : "Daylight"}
-          </button>
-        )}
       </div>
 
       <div className="px-5 pt-4">
@@ -5264,7 +5317,6 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onStartN
   const [expirationDays, setExpirationDays] = useState(365);
   const [busy, setBusy] = useState(false);
   const [menuEv, setMenuEv] = useState(null); // event whose action sheet is open
-  const [showMoreTabs, setShowMoreTabs] = useState(false);
   const today = localDateStr();
   // An organizer (Major) event has no claimed field — null here is handled by
   // the open/edit handlers in App().
@@ -5433,31 +5485,13 @@ function EventsHubScreen({ myFields, events, eventsLoading, onNewEvent, onStartN
           />
         </label>
 
-        <div className="flex items-center gap-2 mt-3">
-          {mainTabs.map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)} className="inline-flex items-center gap-1.5 text-[13px] font-semibold whitespace-nowrap transition-transform duration-100 active:scale-95" style={chip(tab === key)}>
+        <div className="flex items-center gap-2 mt-3 -mx-4 px-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          {[...mainTabs, ...moreTabs].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} className="inline-flex items-center gap-1.5 text-[13px] font-semibold whitespace-nowrap flex-shrink-0 transition-transform duration-100 active:scale-95" style={chip(tab === key)}>
               {label}<span style={{ opacity: 0.6 }}>{tabCount(key)}</span>
             </button>
           ))}
-          <button
-            onClick={() => setShowMoreTabs((v) => !v)}
-            aria-label="More filters: canceled and deleted"
-            aria-expanded={showMoreTabs}
-            className="ml-auto flex items-center justify-center flex-shrink-0 transition-transform duration-100 active:scale-95"
-            style={{ width: 44, height: 44, borderRadius: T.rPill, border: `1px solid ${moreTabs.some(([k]) => k === tab) ? T.ash : T.line}` }}
-          >
-            <MoreHorizontal size={18} color={T.ashDim} />
-          </button>
         </div>
-        {(showMoreTabs || moreTabs.some(([k]) => k === tab)) && (
-          <div className="flex items-center gap-2 mt-2">
-            {moreTabs.map(([key, label]) => (
-              <button key={key} onClick={() => setTab(key)} className="inline-flex items-center gap-1.5 text-[13px] font-semibold whitespace-nowrap transition-transform duration-100 active:scale-95" style={chip(tab === key)}>
-                {label}<span style={{ opacity: 0.6 }}>{tabCount(key)}</span>
-              </button>
-            ))}
-          </div>
-        )}
 
         <div className="mt-4 flex flex-col gap-2.5">
           {eventsLoading ? (
@@ -5886,7 +5920,7 @@ function AnalyticsScreen({ events, eventsLoading, totalSignatures, activityLoadi
   );
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-6 pb-4">
         <div className="text-[34px] font-bold uppercase leading-none" style={{ ...cond, color: T.ash }}>Analytics</div>
         <p className="text-[12px]" style={{ ...body, color: T.ashDim }}>Real numbers only — no ratings yet, since reviews don't exist.</p>
@@ -6345,7 +6379,7 @@ function FeeModelScreen({ profile, user, onBack }) {
   if (profile?.feeModel) {
     const isAbsorb = profile.feeModel === "absorb";
     return (
-      <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+      <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
         {header}
         <div className="px-6 pt-6">
           <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, outline: `1.5px solid ${T.good}`, outlineOffset: -1 }}>
@@ -6370,7 +6404,7 @@ function FeeModelScreen({ profile, user, onBack }) {
   // Not chosen yet — the real picker (also doubles as the mandatory gate,
   // rendered with no onBack in that case).
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       {header}
       <div className="px-6 pt-6">
         {error && <p className="text-[12px] mb-3 text-center" style={{ ...body, color: T.alert }}>{error}</p>}
@@ -6494,7 +6528,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
 
   if (profile?.payoutsEnabled) {
     return (
-      <div className="h-full overflow-y-auto" style={flatBg}>
+      <div className="h-full overflow-y-auto" style={{ ...flatBg }}>
         {header}
         <div className="px-6 pt-8 text-center">
           <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center" style={{ background: T.good, borderRadius: 999 }}>
@@ -6543,7 +6577,7 @@ function PayoutsScreen({ profile, onBack, checking }) {
   const alreadyStarted = !!profile?.stripeConnectAccountId;
 
   return (
-    <div className="h-full overflow-y-auto" style={flatBg}>
+    <div className="h-full overflow-y-auto" style={{ ...flatBg }}>
       {header}
       <div className="px-6 pt-8">
         <div className="p-4 mb-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
@@ -6785,7 +6819,7 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
   const activeLegal = LEGAL_TABS.find((t) => t.key === legalTab) || LEGAL_TABS[0];
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-6 pb-4">
         <div className="text-[34px] font-bold uppercase leading-none" style={{ ...cond, color: T.ash }}>Settings</div>
       </div>
@@ -7134,7 +7168,7 @@ function InstallGateScreen({ platform, deferredPrompt }) {
   };
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center px-8 text-center" style={flatBg}>
+    <div className="h-screen flex flex-col items-center justify-center px-8 text-center" style={{ ...flatBg }}>
       <style>{FONTS}</style>
       <div className="w-16 h-16 flex items-center justify-center mb-4 overflow-hidden" style={{ borderRadius: 12 }}>
         <img src={`${import.meta.env.BASE_URL}logo.jpg`} alt="Atlas" className="w-full h-full" style={{ objectFit: "cover" }} />
@@ -7306,7 +7340,7 @@ function ClaimWelcomeScreen({ fieldName, onContinue }) {
 // ALSO run as a Major is a Phase 2 decision.
 function NewEventChoiceScreen({ myFields, onBack, onPickField, onPickVenue }) {
   return (
-    <div className="h-screen flex flex-col" style={flatBg}>
+    <div className="h-screen flex flex-col" style={{ ...flatBg }}>
       <div className="px-5 pt-5 pb-3 flex items-center gap-3">
         <button onClick={onBack} className="p-1" aria-label="Back"><ChevronLeft size={22} color={T.ash} /></button>
         <h1 className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>Where's this event?</h1>
@@ -7410,7 +7444,7 @@ function StaffManageScreen({ myFields, onBack }) {
   };
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-2 pb-4 flex items-center" style={{ borderBottom: `1px solid ${T.line}` }}>
         <button onClick={onBack} className="w-9 h-9 -ml-2 flex items-center justify-center transition-transform duration-100 active:scale-90">
           <ChevronLeft size={20} color={T.ash} />
@@ -7567,7 +7601,7 @@ function StaffVerifyEmailScreen({ email, sent, onCheck, onResend, onLogout }) {
   };
 
   return (
-    <div className="h-full flex flex-col justify-center px-6" style={flatBg}>
+    <div className="h-full flex flex-col justify-center px-6" style={{ ...flatBg }}>
       <div className="mb-2 flex items-center gap-2" style={{ color: T.accent }}><Users size={18} /><span className="text-[11px] font-semibold uppercase" style={{ ...mono, letterSpacing: "0.08em" }}>Field Staff</span></div>
       <h1 className="text-[22px] font-semibold mb-2" style={{ ...display, color: T.ash }}>Confirm your email</h1>
       <p className="text-[13px] mb-5" style={{ ...body, color: T.ashDim, lineHeight: 1.55 }}>
@@ -7632,7 +7666,7 @@ function StaffHomeScreen({ grants, user, onOpenRoster, onLogout }) {
   }));
 
   return (
-    <div className="h-full overflow-y-auto pb-24" style={flatBg}>
+    <div className="h-full overflow-y-auto pb-24" style={{ ...flatBg }}>
       <div className="px-6 pt-6 pb-4 flex items-start justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2" style={{ color: T.accent }}><Users size={15} /><span className="text-[11px] font-semibold uppercase" style={{ ...mono, letterSpacing: "0.08em" }}>Field Staff</span></div>
@@ -7925,12 +7959,17 @@ export default function App() {
   const openCheckIn = () => setOverlay("checkIn");
   // Straight to the camera for one event (back returns to its roster).
   const openCheckInFor = (ev) => { setRosterEvent(ev); setOverlay("checkIn"); };
-  // Nav Scan: today's event if there's exactly one, otherwise the Roster tab.
+  // Nav Scan: straight to the scanner for the event running today; the
+  // Roster tab only when nothing is running today.
   const handleNavScan = () => {
     const t = localDateStr();
     const live = (allMyEvents || []).filter((e) => !e.deleted && !e.draft && !e.canceled && e.date && e.date <= t && (e.endDate || e.date) >= t);
-    if (live.length === 1) openCheckInFor(live[0]);
-    else { setOverlay(null); setActiveTab("roster"); }
+    if (live.length === 0) { setOverlay(null); setActiveTab("roster"); return; }
+    const now = new Date();
+    const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const inWindow = live.find((e) => (!e.startTime || e.startTime <= hhmm) && (!e.endTime || e.endTime >= hhmm));
+    const pick = inWindow || [...live].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""))[0];
+    openCheckInFor(pick);
   };
   const closeOverlay = () => setOverlay(null);
 
@@ -7982,8 +8021,6 @@ export default function App() {
           event={rosterEvent}
           onBack={closeOverlay}
           onOpenCheckIn={openCheckIn}
-          daylight={daylight}
-          onToggleDaylight={toggleDaylight}
           banned={banned}
           bannedLoading={bannedLoading}
           banPlayer={banPlayer}
@@ -8109,8 +8146,6 @@ export default function App() {
         event={rosterEvent}
         onBack={closeOverlay}
         onOpenCheckIn={openCheckIn}
-        daylight={daylight}
-        onToggleDaylight={toggleDaylight}
         banned={banned}
         bannedLoading={bannedLoading}
         banPlayer={banPlayer}
