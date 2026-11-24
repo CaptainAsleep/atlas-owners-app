@@ -146,7 +146,7 @@ Any waiver text you write is yours — Atlas provides the tool to collect e-sign
 Through the App, you can see real names and waiver signatures for players attending your own events, and real booking/check-in data. You agree to use this information only for operating your events, not for any other purpose, and not to share it beyond what's reasonably necessary to run them.
 
 7. Tickets, Fees & Payouts
-Ticket payments are processed by Stripe. Atlas charges a fee of 3.5% of the ticket price plus $1.30 per ticket, with no per-ticket cap, which is deducted from your payout — players pay the ticket price you set. Payouts require you to complete Stripe's account setup, and you agree to Stripe's own terms. Fee terms may change with notice.
+Ticket payments are processed by Stripe. Atlas charges a fee of 3.5% of the ticket price plus $1.30 per ticket, with no per-ticket cap. For each event you choose who pays it: it is deducted from your payout and players pay the ticket price you set; it is added to the player's price at checkout; or it is split, where players pay a card payment processing portion of 2.9% of the ticket price plus $0.30 per ticket at checkout and the rest is deducted from your payout. The choice locks once the event has its first booking. Payouts require you to complete Stripe's account setup, and you agree to Stripe's own terms. Fee terms may change with notice.
 
 8. Canceled Events
 If you cancel an event, players who already paid receive an Atlas voucher for the amount of their ticket, redeemable on your other events, rather than a refund through Stripe. You are responsible for any additional refund obligations that apply to you under the law or your own policies.
