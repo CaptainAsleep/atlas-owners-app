@@ -4167,75 +4167,43 @@ function LegalAgreementScreen({ onAccept, kind = "field", staffFieldNames = [] }
   );
 }
 
-// One-time "what do you do?" screen for accounts that haven't said yet (new
-// signups, or an owner account with no field). Multi-select: a field owner
-// who also runs events elsewhere picks both. Purely tailors the app — the
-// server never reads this for permissions or fees — and it can be changed
-// any time under Settings > Account Type.
-function RoleSelectionScreen({ onSave, onLogout }) {
-  const [fieldOwner, setFieldOwner] = useState(false);
-  const [organizer, setOrganizer] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const options = [
-    {
-      key: "fieldOwner",
-      on: fieldOwner,
-      toggle: () => setFieldOwner(!fieldOwner),
-      title: "I own or manage a field",
-      body: "Claim your field, manage its page, and run events there.",
-    },
-    {
-      key: "organizer",
-      on: organizer,
-      toggle: () => setOrganizer(!organizer),
-      title: "I organize events",
-      body: "Run events at fields or sites you don't own. You add the venue details on each event.",
-    },
-  ];
-
-  const handleContinue = async () => {
-    setSaving(true);
-    setError("");
-    try {
-      await onSave({ fieldOwner, organizer });
-    } catch (err) {
-      console.error("setAccountRoles failed:", err);
-      setError("Couldn't save that — try again.");
-      setSaving(false);
-    }
-  };
-
+// Field-owners-only gate (2026-11-27, per Michael): the Owners app is
+// strictly for field owners, so an account with no claimed field lands here
+// and can't go further until it claims one. Pending manual-review claims are
+// listed so those owners know it's in progress. Event organizers who don't
+// own a field use the Atlas Major app (same login), linked in a new tab.
+const MAJOR_APP_URL = "https://majorapp.airsoftatlas.app";
+function ClaimRequiredScreen({ pendingFields, onClaim, onLogout }) {
   return (
     <div className="h-screen flex flex-col px-6 overflow-y-auto" style={{ ...flatBg }}>
       <style>{FONTS}</style>
       <div className="pt-10 pb-4">
-        <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>What brings you to Atlas?</h1>
+        <h1 className="text-[20px] font-semibold mb-1" style={{ ...display, color: T.ash }}>Claim your field to get started</h1>
         <p className="text-[13px]" style={{ ...body, color: T.ashDim }}>
-          Pick everything that fits — we'll set the app up around it. You can change this later in Settings.
+          The Atlas Owners app is for field owners. Claim the field you own or manage to set up your page, run events, and get paid.
         </p>
       </div>
-      <div className="flex flex-col gap-3 mb-4">
-        {options.map((o) => (
-          <button
-            key={o.key}
-            onClick={o.toggle}
-            className="w-full p-4 flex items-start gap-3 text-left transition-transform duration-100 active:scale-[0.98]"
-            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, outline: o.on ? `2px solid ${T.accent}` : "2px solid transparent", outlineOffset: -2 }}
-          >
-            <div className="w-5 h-5 mt-0.5 flex-shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${o.on ? T.accent : T.line}`, background: o.on ? T.accent : "transparent", borderRadius: 4 }}>
-              {o.on && <Check size={13} color="#fff" strokeWidth={3} />}
+      {pendingFields.length > 0 && (
+        <div className="flex flex-col gap-2 mb-4">
+          {pendingFields.map((f) => (
+            <div key={f.id} className="p-4 flex items-start gap-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+              <Shield size={18} color={T.ashDim} className="mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{f.name}: pending review</div>
+                <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>Awaiting manual review. You'll get full access once it's approved.</div>
+              </div>
             </div>
-            <div>
-              <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>{o.title}</div>
-              <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>{o.body}</div>
-            </div>
-          </button>
-        ))}
+          ))}
+        </div>
+      )}
+      <PrimaryButton onClick={onClaim}>{pendingFields.length > 0 ? "Claim another field" : "Claim your field"}</PrimaryButton>
+      <div className="mt-6 p-4" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}>
+        <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>Run events at fields you don't own?</div>
+        <div className="text-[12px] mb-3" style={{ ...body, color: T.ashDim }}>Event organizers use the Atlas Major app. Sign in there with this same email and password.</div>
+        <a href={MAJOR_APP_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[13px] font-semibold" style={{ ...body, color: T.accent }}>
+          Open Atlas Major <ExternalLink size={14} />
+        </a>
       </div>
-      {error && <p className="text-[12px] mb-3" style={{ ...body, color: T.alert }}>{error}</p>}
-      <PrimaryButton onClick={handleContinue} disabled={saving || (!fieldOwner && !organizer)}>{saving ? "Saving…" : "Continue"}</PrimaryButton>
       <button onClick={onLogout} className="text-center text-[12px] mt-4 pb-8" style={{ ...body, color: T.ashFaint }}>Sign out</button>
     </div>
   );
@@ -6738,11 +6706,9 @@ function OwnerFeedbackSection() {
   );
 }
 
-function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, setAccountRoles, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onOpenStaff, onLogout , daylight, onToggleDaylight}) {
+function SettingsScreen({ profile, user, updateOwnerName, changePassword, deleteAccount, isFieldOwner, isOrganizer, hasFields, onOpenBilling, onOpenPayouts, onOpenYearInReview, onOpenStaff, onLogout , daylight, onToggleDaylight}) {
   // Organizer-only accounts have no field fee model to show.
   const showFieldFee = isFieldOwner || !isOrganizer;
-  const [rolesSaving, setRolesSaving] = useState(false);
-  const [rolesError, setRolesError] = useState("");
   const [name, setName] = useState(profile?.name || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -6794,24 +6760,6 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
     if (code === "auth/too-many-requests") return "Too many attempts — wait a bit and try again.";
     if (code === "atlas/upcoming-events") return "You still have upcoming events people may have tickets for. Cancel them first (that issues vouchers to anyone who paid), then delete your account.";
     return "Something went wrong — try again.";
-  };
-
-  // Account type is UX tailoring only (it changes what the app shows you, not
-  // what you're allowed to do or what you're charged). A field can't be
-  // "un-owned" from here, and at least one type must stay on.
-  const changeRole = async (key, value) => {
-    const next = { fieldOwner: isFieldOwner, organizer: isOrganizer, [key]: value };
-    if (!next.fieldOwner && !next.organizer) return;
-    setRolesSaving(true);
-    setRolesError("");
-    try {
-      await setAccountRoles(next);
-    } catch (err) {
-      console.error("setAccountRoles failed:", err);
-      setRolesError("Couldn't save that — try again.");
-    } finally {
-      setRolesSaving(false);
-    }
   };
 
   const submitPasswordChange = async (e) => {
@@ -6895,33 +6843,6 @@ function SettingsScreen({ profile, user, updateOwnerName, changePassword, delete
         <div className="mb-6">
           <PrimaryButton onClick={handleSave} disabled={saving || !name.trim() || name.trim() === profile?.name}>{saving ? "Saving…" : "Save Name"}</PrimaryButton>
         </div>
-
-        <Eyebrow>Account Type</Eyebrow>
-        <p className="text-[11px] mb-2 -mt-1" style={{ ...body, color: T.ashFaint }}>
-          Sets up the app around what you do. It doesn't change what you can access or what you're charged.
-        </p>
-        <div className="mb-3 flex flex-col gap-2">
-          {[
-            { key: "fieldOwner", label: "I own or manage a field", on: isFieldOwner, locked: hasFields, lockedNote: "You have a claimed field, so this stays on." },
-            { key: "organizer", label: "I organize events", on: isOrganizer, locked: false },
-          ].map((r) => (
-            <label key={r.key} className="p-3 flex items-start gap-3" style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd, opacity: rolesSaving ? 0.6 : 1 }}>
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={r.on}
-                disabled={rolesSaving || (r.on && r.locked) || (r.on && !(r.key === "fieldOwner" ? isOrganizer : isFieldOwner))}
-                onChange={(e) => changeRole(r.key, e.target.checked)}
-              />
-              <span>
-                <span className="text-[13px] font-medium block" style={{ ...body, color: T.ash }}>{r.label}</span>
-                {r.on && r.locked && <span className="text-[10px] block" style={{ ...body, color: T.ashFaint }}>{r.lockedNote}</span>}
-              </span>
-            </label>
-          ))}
-        </div>
-        {rolesError && <p className="text-[12px] mb-2" style={{ ...body, color: T.alert }}>{rolesError}</p>}
-        <div className="mb-3" />
 
         {showFieldFee && (
         <>
@@ -7376,43 +7297,6 @@ function ClaimWelcomeScreen({ fieldName, onContinue }) {
 }
 
 /* ---------- App shell ---------- */
-// Shown only to someone who is both a field owner and an organizer, when they
-// start a new event: at one of their own fields (a regular field event), or
-// at another venue (an Atlas Major, venue typed in or copied from the
-// directory). Deliberately a plain choice — whether an own-field event can
-// ALSO run as a Major is a Phase 2 decision.
-function NewEventChoiceScreen({ myFields, onBack, onPickField, onPickVenue }) {
-  return (
-    <div className="h-screen flex flex-col" style={{ ...flatBg }}>
-      <div className="px-5 pt-5 pb-3 flex items-center gap-3">
-        <button onClick={onBack} className="p-1" aria-label="Back"><ChevronLeft size={22} color={T.ash} /></button>
-        <h1 className="text-[18px] font-semibold" style={{ ...display, color: T.ash }}>Where's this event?</h1>
-      </div>
-      <div className="flex-1 overflow-y-auto px-5 pb-8 flex flex-col gap-3">
-        {myFields.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => onPickField(f)}
-            className="w-full p-4 text-left transition-transform duration-100 active:scale-[0.98]"
-            style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
-          >
-            <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>At {f.name}</div>
-            <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>Your field — a regular field event.</div>
-          </button>
-        ))}
-        <button
-          onClick={onPickVenue}
-          className="w-full p-4 text-left transition-transform duration-100 active:scale-[0.98]"
-          style={{ background: T.panel, borderRadius: T.rCard, boxShadow: T.shadowMd }}
-        >
-          <div className="text-[14px] font-semibold" style={{ ...display, color: T.ash }}>At another venue</div>
-          <div className="text-[12px]" style={{ ...body, color: T.ashDim }}>You'll enter the venue's name and address — or copy it from an Atlas field.</div>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ===========================================================================
 // Field Staff Logins (2026-10-27)
 // ===========================================================================
@@ -7850,7 +7734,7 @@ export default function App() {
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  const { user, profile, authLoading, signUp, signIn, sendPasswordReset, signOut, updateOwnerName, acceptTerms, acceptOrganizerTerms, setAccountRoles, changePassword, deleteAccount } = useOwnerAuth();
+  const { user, profile, authLoading, signUp, signIn, sendPasswordReset, signOut, updateOwnerName, acceptTerms, changePassword, deleteAccount } = useOwnerAuth();
 
   // App-level, not scoped to any one screen — a real gap in the earlier
   // version: mobile Safari can silently reload a backgrounded tab to free
@@ -7920,11 +7804,11 @@ export default function App() {
 
   const activeField = myFields.find((f) => f.id === activeFieldId) || allFields.find((f) => f.id === activeFieldId);
   const myFieldIds = myFields.map((f) => f.id);
-  // Passing the uid always: organizer events (hostOwnerId == uid) are merged
-  // in with field events. A field-only account simply matches none.
-  const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds, user?.uid);
+  // Field events only. Organizer (Major, hostOwnerId) events live in the
+  // Atlas Major app since 2026-11-27 — no host uid passed here.
+  const { events: allMyEvents, eventsLoading: allMyEventsLoading } = useOwnerEvents(myFieldIds, null);
   const { createEvent, createMajorEvent, updateEvent, deleteEvent, restoreEvent, duplicateEvent, newEventId } = useOwnerEventActions();
-  const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds, user?.uid);
+  const { activity, totalSignatures, activityLoading } = useRecentActivity(myFieldIds, null);
   const { banned, bannedLoading } = useBannedPlayers(rosterEvent?.fieldId);
   const { banPlayer, unbanPlayer } = useBanActions();
 
@@ -7958,25 +7842,21 @@ export default function App() {
     return r;
   };
 
-  // Role tailoring (UX only — never used for permissions or fees; the server
-  // decides those from field ownership / the event's own hostOwnerId+isMajor).
-  // Field owner = said so, or actually owns a field. Organizer = said so.
+  // Field owners only (2026-11-27, per Michael): organizers use the Atlas
+  // Major app. isOrganizer is pinned false so every organizer branch below
+  // (venue-mode editor, organizer terms/fees, Major events) stays off here;
+  // that code is left in place because the Major app is a fork of this file.
+  // This app no longer writes accountRoles (the role picker and Settings
+  // toggles are gone); it's only read below for the staff-mode check.
   const hasFields = myFields.length > 0;
-  const isFieldOwner = !!profile?.accountRoles?.fieldOwner || hasFields;
-  const isOrganizer = profile?.accountRoles?.organizer === true;
-  // Still working out whether this account needs the picker (don't flash it
-  // at an existing owner whose fields haven't loaded yet).
-  const rolesUndetermined = !!profile && !profile.accountRoles && (myFieldsLoading || pendingLoading);
-  const needsRolePicker = !!profile && !profile.accountRoles && !hasFields && pendingFields.length === 0 && !myFieldsLoading && !pendingLoading;
-  // Organizer-only accounts don't owe the field-owner agreement. Anyone not
-  // clearly organizer-only keeps the original gate, so existing owners see
-  // exactly what they saw before.
-  const organizerOnly = isOrganizer && !isFieldOwner;
-  const needsFieldTerms = !organizerOnly && profile?.acceptedTermsVersion !== CURRENT_TERMS_VERSION;
-  const needsOrganizerTerms = isOrganizer && profile?.acceptedOrganizerTermsVersion !== ORGANIZER_TERMS_VERSION;
+  const isFieldOwner = true;
+  const isOrganizer = false;
+  // No claimed field = gated to the claim screen (pending claims shown there).
+  const ownershipLoading = myFieldsLoading || pendingLoading;
+  const needsFieldTerms = profile?.acceptedTermsVersion !== CURRENT_TERMS_VERSION;
   // Staff mode applies to accounts that are ONLY staff — an owner who is
   // also staff somewhere else is out of v1 (Michael, 2026-10-27).
-  const noOwnerFootprint = !hasFields && !isOrganizer && pendingFields.length === 0 && !profile?.accountRoles?.fieldOwner;
+  const noOwnerFootprint = !hasFields && pendingFields.length === 0 && !profile?.accountRoles?.fieldOwner;
   const staffCheckDone = !!user && staffInviteCheck.uid === user.uid && staffInviteCheck.status !== "checking";
   const staffOnly = noOwnerFootprint && staffGrants.length > 0;
   const staffWaitingForGrants = noOwnerFootprint && staffInviteCheck.status === "accepted" && staffInviteCheck.acceptedCount > 0 && staffGrants.length === 0;
@@ -7988,14 +7868,8 @@ export default function App() {
   const openVenueEventEdit = () => { setActiveFieldId(null); setEditingEvent(null); setNewEventVenue(true); setOverlay("eventEdit"); };
   const openEventOverview = (field, ev) => { setActiveFieldId(field ? field.id : null); setEditingEvent(ev); setOverlay("eventOverview"); };
   // One entry point for every "create event" button.
-  //  - field owner only → straight into their field (unchanged behavior)
-  //  - organizer only   → venue form
-  //  - organizer who also owns a field → ask which
-  //  - neither yet      → claim a field (unchanged behavior)
   const startNewEvent = () => {
-    if (isOrganizer && hasFields) setOverlay("newEventChoice");
-    else if (isOrganizer) openVenueEventEdit();
-    else if (hasFields) openEventEdit(myFields[0], null);
+    if (hasFields) openEventEdit(myFields[0], null);
     else openClaim();
   };
   const openRoster = (ev) => { setRosterEvent(ev); setOverlay("roster"); };
@@ -8075,14 +7949,14 @@ export default function App() {
     } else {
       content = <StaffHomeScreen grants={staffGrants} user={user} onOpenRoster={openRoster} onLogout={handleLogout} />;
     }
-  } else if (rolesUndetermined) {
+  } else if (!hasFields && ownershipLoading) {
+    // Don't flash the claim gate at an owner whose fields haven't loaded yet.
     content = <LoadingScreen />;
-  } else if (needsRolePicker) {
-    content = <RoleSelectionScreen onSave={setAccountRoles} onLogout={handleLogout} />;
-  } else if (needsFieldTerms) {
+  } else if (needsFieldTerms && (hasFields || pendingFields.length > 0 || overlay === "claim")) {
+    // No-field accounts see the claim gate first (so an organizer who signed
+    // up here isn't asked to accept field-owner terms just to be pointed to
+    // Atlas Major); the agreement comes up when they actually go to claim.
     content = <LegalAgreementScreen key="field" kind="field" onAccept={() => acceptTerms(CURRENT_TERMS_VERSION)} />;
-  } else if (needsOrganizerTerms) {
-    content = <LegalAgreementScreen key="organizer" kind="organizer" onAccept={() => acceptOrganizerTerms(ORGANIZER_TERMS_VERSION)} />;
   } else if (myFields.length > 0 && !profile.comped && !profile.feeModel) {
     // A real gate, not just a Settings entry — once an owner has actually
     // claimed a field (not before; claiming itself always stays open),
@@ -8106,6 +7980,11 @@ export default function App() {
         onClaimed={(fieldId) => { setActiveFieldId(fieldId); setOverlay("claimWelcome"); }}
       />
     );
+  } else if (!hasFields && overlay !== "claimWelcome" && overlay !== "field") {
+    // Hard gate: nothing past here without a claimed field. claimWelcome and
+    // field are let through so a fresh claim isn't bounced back here before
+    // the myFields listener catches up.
+    content = <ClaimRequiredScreen pendingFields={pendingFields} onClaim={openClaim} onLogout={handleLogout} />;
   } else if (overlay === "staffManage" && hasFields) {
     content = <StaffManageScreen myFields={myFields} onBack={closeOverlay} />;
   } else if (overlay === "billing") {
@@ -8142,15 +8021,6 @@ export default function App() {
         onOpenEvents={() => { closeOverlay(); setActiveTab("events"); }}
         profile={profile}
         events={allMyEvents}
-      />
-    );
-  } else if (overlay === "newEventChoice") {
-    content = (
-      <NewEventChoiceScreen
-        myFields={myFields}
-        onBack={closeOverlay}
-        onPickField={(f) => openEventEdit(f, null)}
-        onPickVenue={openVenueEventEdit}
       />
     );
   } else if (overlay === "eventOverview" && editingEvent && (activeField || editingEvent.isMajor)) {
@@ -8241,7 +8111,6 @@ export default function App() {
           updateOwnerName={updateOwnerName}
           changePassword={changePassword}
           deleteAccount={deleteAccount}
-          setAccountRoles={setAccountRoles}
           isFieldOwner={isFieldOwner}
           isOrganizer={isOrganizer}
           hasFields={hasFields}
